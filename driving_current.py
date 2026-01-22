@@ -79,7 +79,16 @@ def filter_cars(cars):
     return close_cars
 
 # Create environment
-env = gym.make('highway-v0', render_mode='rgb_array')
+config = {
+    "observation": {
+        "type": "Kinematics",
+        "vehicles_count": 5,
+        "features": ["presence", "x", "y", "vx", "vy"],
+        "absolute": True,  # This is the key setting
+        "normalize": False # Usually best to disable normalization for raw absolute values
+    }
+}
+env = gym.make('highway-v0', render_mode='rgb_array', config=config)
 frames = 0 # Initialize frame counter
 episodes = 1 # Number of episodes to run
 
@@ -98,31 +107,34 @@ async def main():
                 Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
                 frames += 1
 
-                cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
+                cars = [[round(obs[0][1], 0), round(obs[0][2] / 4 + 1, 0), round(obs[0][3], 4), round(obs[0][4], 4)]]
+#                cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
 
                 for i in range (1, len(obs[0])):
-                    cars = cars + [[obs[i][1] * 100, obs[i][2] * 100, obs[i][3] * 20, obs[i][4] * 20]]
+                    cars = cars + [[round(obs[i][1], 0), round(obs[i][2] / 4 + 1, 0), round(obs[i][3], 4), round(obs[i][4], 4)]]
 
     #            road = env.unwrapped.road
 
                 print(cars)
 
+
+
     #           cars = [] # To store positions, speeds, lanes of all vehicles on the road
 
                 # Prompt ChatGPT with list of cars and prompt and take the specified action
-    #            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars)
-    #            print(response)
-    #            print(f"Action: {action}")
+                response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars)
+                print(response)
+                print(f"Action: {action}")
 
-                result = await Runner.run(
-                    agent,
-                    f"Here is the current state of the environment {cars}. What action should be taken? Also, identify which vehicle is closest to the ego vehicle in it's current lane",
-                    session=session
-                )
-                print(result.final_output)  # "San Francisco"
+#                result = await Runner.run(
+#                    agent,
+#                    f"Here is the current state of the environment {cars}. What action should be taken? Also, identify which vehicle is closest to the ego vehicle in it's current lane",
+#                    session=session
+#                )
+#                print(result.final_output)  # "San Francisco"
 
-                next_state, _, terminated, truncated, _ = env.step(1)
-    #            next_state, _, terminated, truncated, _ = env.step(action)
+#                next_state, _, terminated, truncated, _ = env.step(1)
+                next_state, _, terminated, truncated, _ = env.step(action)
                 obs = next_state
                 done = terminated or truncated # Episode ends early if a crash occurs
 
