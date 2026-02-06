@@ -49,10 +49,11 @@ for i in range(0, episodes):
         frame = env.render()
         Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
         frames += 1
-        cars = [[obs[0][1], obs[0][2] / 4 + 1, round(obs[0][3], 4), round(obs[0][4], 4)]]
-#        cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
+        cars = [[round(obs[0][1], 4), round(obs[0][2] / 4 + 1), round(obs[0][3], 4), round(obs[0][4], 4)]]
+#                cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
+
         for i in range (1, len(obs[0])):
-            cars = cars + [[obs[i][1], obs[i][2] / 4 + 1, round(obs[i][3], 4), round(obs[i][4], 4)]]
+            cars = cars + [[round(obs[i][1], 0), round(obs[i][2] / 4 + 1), round(obs[i][3], 4), round(obs[i][4], 4)]]
 #            cars = cars + [[obs[i][1] * 100, obs[i][2] * 100, obs[i][3] * 20, obs[i][4] * 20]]
 #        road = env.unwrapped.road
         print(cars)

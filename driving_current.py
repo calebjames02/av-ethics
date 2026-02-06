@@ -78,6 +78,39 @@ def filter_cars(cars):
 
     return close_cars
 
+def same_lane(cars):
+    ego_lane = cars[0][2]
+    return_cars = cars.copy()
+
+    pos = 0
+    while(pos < len(return_cars)):
+        if return_cars[pos][2] != ego_lane:
+            return_cars.pop(pos)
+        else:
+            pos += 1
+
+#    return_cars.pop(0)
+    return return_cars
+
+def closest_same_lane(cars):
+    if(len(cars) == 1):
+        return "There is no car close to the ego vehicle in its lane"
+
+    if(len(cars) == 2):
+        return f"The closest vehicle to the ego vehicle in lane {int(cars[1][2])} is {cars[1][0]} at position x = {cars[1][1]}"
+
+    if(len(cars) > 2):
+        index = 2
+        ego_pos = cars[0][1]
+        distance = abs(ego_pos - cars[1][1])
+
+        for i in range(2, len(cars)):
+            new_dist = abs(ego_pos - cars[i][1])
+            if(new_dist < distance):
+                distance = new_dist
+
+    return 0
+
 # Create environment
 config = {
     "observation": {
@@ -107,24 +140,28 @@ async def main():
                 Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
                 frames += 1
 
-                cars = [[round(obs[0][1], 0), round(obs[0][2] / 4 + 1, 0), round(obs[0][3], 4), round(obs[0][4], 4)]]
+                cars = [["Ego vehicle", round(obs[0][1], 4), round(obs[0][2] / 4 + 1), round(obs[0][3], 4), round(obs[0][4], 4)]]
 #                cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
 
                 for i in range (1, len(obs[0])):
-                    cars = cars + [[round(obs[i][1], 0), round(obs[i][2] / 4 + 1, 0), round(obs[i][3], 4), round(obs[i][4], 4)]]
+                    cars = cars + [[f"Vehicle: {i}", round(obs[i][1], 0), round(obs[i][2] / 4 + 1), round(obs[i][3], 4), round(obs[i][4], 4)]]
 
     #            road = env.unwrapped.road
 
-                print(cars)
-
+                lane_cars = same_lane(cars)
+#                print(len(lane_cars))
+#                print(lane_cars)
+                print(closest_same_lane(lane_cars))
+#                for i in range(0, len(lane_cars)):
+#                    print(f"{lane_cars[i][0]} in lane {lane_cars[i][2]} at position {lane_cars[i][1]}")
 
 
     #           cars = [] # To store positions, speeds, lanes of all vehicles on the road
 
                 # Prompt ChatGPT with list of cars and prompt and take the specified action
-                response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars)
-                print(response)
-                print(f"Action: {action}")
+#                response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars)
+#                print(response)
+#                print(f"Action: {action}")
 
 #                result = await Runner.run(
 #                    agent,
@@ -133,8 +170,8 @@ async def main():
 #                )
 #                print(result.final_output)  # "San Francisco"
 
-#                next_state, _, terminated, truncated, _ = env.step(1)
-                next_state, _, terminated, truncated, _ = env.step(action)
+                next_state, _, terminated, truncated, _ = env.step(1)
+#                next_state, _, terminated, truncated, _ = env.step(action)
                 obs = next_state
                 done = terminated or truncated # Episode ends early if a crash occurs
 
