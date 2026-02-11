@@ -42,6 +42,18 @@ def closest_same_lane(cars):
 
     return f"The closest vehicle to the ego vehicle in lane {ego_lane} is {closest_car.name} at position x = {closest_car.x_pos}"
 
+def time_to_collision(ego, car):
+    relative_dist = car.x_pos - ego.x_pos
+    relative_speed = ego.x_vel - car.x_vel
+
+    if relative_dist <= 0:
+        return 0.0
+
+    if relative_speed <= 0:
+        return float('inf')
+
+    return relative_dist / relative_speed
+
 def run_test(test_name, correct_statement, check_statement):
     print(f"Test {test_name}:", end=" ")
     try:

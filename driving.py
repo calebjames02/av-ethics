@@ -43,13 +43,13 @@ def ask_chat_gpt(prompt, actions, state, memory):
         messages=[
             {"role": "system", "content": prompt},
             # These additional messages give Chat GPT more context on how to interpret what is given to it
-#            {"role": "user", "content": "The ego vehicle will correspond to the first element of the list given to you"},
-            {"role": "user", "content": f"State space: {state} (The state is given in the form [x_pos, y_pos, x_vel, car_lane])"},
+            {"role": "user", "content": "The ego vehicle will correspond to the first element of the list given to you"},
+            {"role": "user", "content": f"State space: {state} (The state is given in the form [vehicle_name, x_pos, x_vel, car_lane])"},
             {"role": "user", "content": f"Available actions: {actions}"},
-            {"role": "user", "content": f"Previous timesteps and actions taken: {memory}"},
-            {"role": "user", "content": "Drive as close to 22 meters per second as you can, however do not sacrifice safety in order to drive faster"},
+#            {"role": "user", "content": f"Previous timesteps and actions taken: {memory}"},
+#            {"role": "user", "content": "Drive as close to 22 meters per second as you can, however do not sacrifice safety in order to drive faster"},
 #            {"role": "user", "content": f"When selecting the index of an action, double-check the numbered list provided to make sure the right index is chosen"},
-#            {"role": "user", "content": f"From left to right the numbers of the lanes are 1, 2, 3, 4"},
+            {"role": "user", "content": f"From left to right the numbers of the lanes are 1, 2, 3, 4"},
         ],
         response_format=DrivingDecision,
     )
@@ -121,6 +121,8 @@ for i in range(0, episodes):
                     cars[i] = ["Ego vehicle"] + cars[i]
                 else:
                     cars[i] = [f"Vehicle {i}"] + cars[i]
+
+#            print(cars)
 
             # Prompt ChatGPT with list of cars and prompt and take the specified action
             response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, memory)

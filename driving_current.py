@@ -56,15 +56,16 @@ agent = Agent(
 session = SQLiteSession("conversation_123")
 
 prompt = "You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."
-def ask_chat_gpt(prompt, actions, state):
+def ask_chat_gpt(prompt, actions, state, closest):
     completion = client.beta.chat.completions.parse(
         model="gpt-4o",
 
         messages=[
             {"role": "system", "content": prompt},
             # These additional messages give Chat GPT more context on how to interpret what is given to it
-            {"role": "user", "content": f"State space: {state} (The state is given in the form [x_pos, y_pos, x_vel, car_lane])"},
+            {"role": "user", "content": f"State space: {state} (The state is given in the form [vehicle_name, x_pos, car_lane, x_vel, y_vel])"},
             {"role": "user", "content": f"Available actions: {actions}"},
+#            {"role": "user", "content": f"{closest}"},
 #            {"role": "user", "content": f"From left to right the numbers of the lanes are 1, 2, 3, 4"},
         ],
         response_format=DrivingDecision,
@@ -144,12 +145,13 @@ async def main():
             for i in range (1, len(obs[0])):
                 cars = cars + [Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
 
-            print(cars)
+#            print(cars)
+            closest = closest_same_lane(cars)
 
             # Prompt ChatGPT with list of cars and prompt and take the specified action
-#            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars)
-#            print(response)
-#            print(f"Action: {action}")
+            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, closest)
+            print(response)
+            print(f"Action: {action}")
 
 #            result = await Runner.run(
 #                agent,
@@ -158,8 +160,8 @@ async def main():
 #            )
 #            print(result.final_output)
 
-            next_state, _, terminated, truncated, _ = env.step(1)
-#            next_state, _, terminated, truncated, _ = env.step(action)
+#            next_state, _, terminated, truncated, _ = env.step(1)
+            next_state, _, terminated, truncated, _ = env.step(action)
             obs = next_state
             done = terminated or truncated # Episode ends early if a crash occurs
 
