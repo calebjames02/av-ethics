@@ -38,7 +38,7 @@ def closest_same_lane(cars):
             closest_car = car
 
     if min_dist == float('inf'):
-        return f"There is no car ahead of the ego vehicle that is close to it in lane {ego_lane}"
+        return f"There is no car close to the ego vehicle in lane {ego_lane}"
 
     return f"The closest vehicle to the ego vehicle in lane {ego_lane} is {closest_car.name} at position x = {closest_car.x_pos}"
 
@@ -93,6 +93,6 @@ run_test("CLOSEST 1", "The closest vehicle to the ego vehicle in lane 1 is Vehic
 run_test("CLOSEST 2", "The closest vehicle to the ego vehicle in lane 1 is Vehicle 1 at position x = 25", closest_same_lane(cars2))
 run_test("CLOSEST 3", "The closest vehicle to the ego vehicle in lane 1 is Vehicle 2 at position x = 10", closest_same_lane(cars3))
 run_test("CLOSEST 4", "The closest vehicle to the ego vehicle in lane 1 is Vehicle 1 at position x = 25", closest_same_lane(cars4))
-run_test("CLOSEST 5", "There is no car ahead of the ego vehicle that is close to it in lane 1", closest_same_lane(cars5))
-run_test("CLOSEST 6", "There is no car ahead of the ego vehicle that is close to it in lane 1", closest_same_lane(cars6))
+run_test("CLOSEST 5", "There is no car close to the ego vehicle in lane 1", closest_same_lane(cars5))
+run_test("CLOSEST 6", "There is no car close to the ego vehicle in lane 1", closest_same_lane(cars6))
 run_test("CLOSEST 7", "The closest vehicle to the ego vehicle in lane 1 is Vehicle 2 at position x = 75", closest_same_lane(cars7))
