@@ -63,7 +63,8 @@ def ask_chat_gpt(prompt, actions, state, closest):
         messages=[
             {"role": "system", "content": prompt},
             # These additional messages give Chat GPT more context on how to interpret what is given to it
-            {"role": "user", "content": f"State space: {state} (The state is given in the form [vehicle_name, x_pos, car_lane, x_vel, y_vel])"},
+#            {"role": "user", "content": f"State space: {state} (The state is given in the form [vehicle_name, x_pos, car_lane, x_vel, y_vel])"},
+            {"role": "user", "content": f"State space: {state}"},
             {"role": "user", "content": f"Available actions: {actions}"},
 #            {"role": "user", "content": f"{closest}"},
 #            {"role": "user", "content": f"From left to right the numbers of the lanes are 1, 2, 3, 4"},
@@ -119,6 +120,21 @@ config = {
         "normalize": False # Usually best to disable normalization for raw absolute values
     }
 }
+
+def dataclass_to_list(cars):
+#    print(f"Before: {cars}")
+    cars_list = [[cars[0].name, cars[0].x_pos, cars[0].lane, cars[0].x_vel, cars[0].y_vel]]
+
+    for car in cars[1:]:
+#        print(car)
+        cars_list = cars_list + [[car.name, car.x_pos, car.lane, car.x_vel, car.y_vel]]
+
+    print()
+#    print(f"After: {cars_list}")
+    print()
+
+    return cars_list
+
 env = gym.make('highway-v0', render_mode='rgb_array', config=config)
 frames = 0 # Initialize frame counter
 episodes = 1 # Number of episodes to run
@@ -138,18 +154,22 @@ async def main():
             Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
             frames += 1
 
-            
+#            cars = [["Ego vehicle", round(obs[0][1], 4), round(obs[0][2] / 4 + 1), round(obs[0][3], 4), round(obs[0][4], 4)]]
             cars = [Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
 #            cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
 
             for i in range (1, len(obs[0])):
-                cars = cars + [Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
+#                cars = cars + [[f"Vehicle: {i}", round(obs[i][1], 0), round(obs[i][2] / 4 + 1), round(obs[i][3], 4), round(obs[i][4], 4)]]
+                cars = cars + [Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4))]
 
 #            print(cars)
-            closest = closest_same_lane(cars)
+#            closest = closest_same_lane(cars)
+
+#            cars = dataclass_to_list(cars)
+#            print(cars)
 
             # Prompt ChatGPT with list of cars and prompt and take the specified action
-            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, closest)
+            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
             print(response)
             print(f"Action: {action}")
 
