@@ -3,6 +3,7 @@ import gymnasium as gym
 import highway_env
 import torch
 import os
+import time
 import shutil
 from PIL import Image
 from pydantic import BaseModel
@@ -18,12 +19,16 @@ class Vehicle:
     x_vel: float
     y_vel: float
 
+frames = f"frames/frames_{int(time.time())}"
+
 # Remove previously saved frames if there are any
-if os.path.exists("frames"):
-    shutil.rmtree("frames")
+if os.path.exists(frames):
+    shutil.rmtree(frames)
 
 # Create new empty folder to save each frame of the environment
-os.makedirs("frames", exist_ok=True)
+os.makedirs(frames, exist_ok=True)
+
+log = open(f"{frames}/log.txt", "w")
 
 # Access OpenAI API key from key.txt file
 file = open("key.txt", 'r')
@@ -41,6 +46,22 @@ ACTIONS_ALL = [
     "3: FASTER",
     "4: SLOWER"
 ]
+
+def return_action(action):
+    if action == 0:
+        return "LANE_LEFT"
+    
+    if action == 1:
+        return "IDLE"
+    
+    if action == 2:
+        return "LANE_RIGHT"
+    
+    if action == 3:
+        return "FASTER"
+    
+    if action == 4:
+        return "SLOWER"
 
 # Structures the response into a separate explanation and action
 # This ensures the action can be properly identified even if the format of the response changes
@@ -116,8 +137,8 @@ config = {
         "type": "Kinematics",
         "vehicles_count": 5,
         "features": ["presence", "x", "y", "vx", "vy"],
-        "absolute": True,  # This is the key setting
-        "normalize": False # Usually best to disable normalization for raw absolute values
+        "absolute": True,
+        "normalize": False
     }
 }
 
@@ -151,8 +172,10 @@ async def main():
         while not done:
             # Save frame locally
             frame = env.render()
-            Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
+            Image.fromarray(frame).save(f"{frames}/frame_{frames:05d}.png")
             frames += 1
+
+            log.write(f"Timestep: {frames}\n\n")
 
 #            cars = [["Ego vehicle", round(obs[0][1], 4), round(obs[0][2] / 4 + 1), round(obs[0][3], 4), round(obs[0][4], 4)]]
             cars = [Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
@@ -162,6 +185,11 @@ async def main():
 #                cars = cars + [[f"Vehicle: {i}", round(obs[i][1], 0), round(obs[i][2] / 4 + 1), round(obs[i][3], 4), round(obs[i][4], 4)]]
                 cars = cars + [Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4))]
 
+            for i in range (0, len(cars)):
+                log.write(f"{cars[i]}\n")
+
+            log.write("\n")
+
 #            print(cars)
 #            closest = closest_same_lane(cars)
 
@@ -170,8 +198,11 @@ async def main():
 
             # Prompt ChatGPT with list of cars and prompt and take the specified action
             response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-            print(response)
-            print(f"Action: {action}")
+#            print(response)
+#            print(f"Action: {action}")
+
+            log.write(f"Action: {return_action(action)}\n\n")
+            log.write(f"Response:\n{response}\n\n")
 
 #            result = await Runner.run(
 #                agent,
@@ -185,11 +216,15 @@ async def main():
             obs = next_state
             done = terminated or truncated # Episode ends early if a crash occurs
 
+            log.write("-------------------------------------------------\n\n")
+
         # After episode ends save the last frame
         # This is necessary to save the frame of a crash
         frame = env.render()
-        Image.fromarray(frame).save(f"frames/frame_{frames:05d}.png")
+        Image.fromarray(frame).save(f"{frames}/frame_{frames:05d}.png")
         frames += 1
 
 if __name__ == "__main__":
 	asyncio.run(main())
+
+log.close()
