@@ -1,15 +1,13 @@
-import asyncio
 import gymnasium as gym
 import highway_env
-import torch
 import os
 import time
-import shutil
+from agents import Agent, SQLiteSession
+from dataclasses import dataclass
+from openai import OpenAI
 from PIL import Image
 from pydantic import BaseModel
-from openai import OpenAI
-from agents import Agent, Runner, SQLiteSession
-from dataclasses import dataclass
+from torch.utils.tensorboard import SummaryWriter
 
 @dataclass
 class Vehicle:
@@ -19,24 +17,11 @@ class Vehicle:
     x_vel: float
     y_vel: float
 
-frames = f"frames/frames_{int(time.time())}"
-
-# Remove previously saved frames if there are any
-if os.path.exists(frames):
-    shutil.rmtree(frames)
-
-# Create new empty folder to save each frame of the environment
-os.makedirs(frames, exist_ok=True)
-
-log = open(f"{frames}/log.txt", "w")
-
 # Access OpenAI API key from key.txt file
-file = open("key.txt", 'r')
-key = file.readline() # Read the API key from the file
-key = key[:len(key) - 1] # Remove newline from string
+with open("key.txt") as file:
+    key = file.readline().strip()
 os.environ["OPENAI_API_KEY"] = key
 client = OpenAI()
-#client = OpenAI(api_key=key) # Set API key
 
 # Discrete action space
 ACTIONS_ALL = [
@@ -84,11 +69,9 @@ def ask_chat_gpt(prompt, actions, state, closest):
         messages=[
             {"role": "system", "content": prompt},
             # These additional messages give Chat GPT more context on how to interpret what is given to it
-#            {"role": "user", "content": f"State space: {state} (The state is given in the form [vehicle_name, x_pos, car_lane, x_vel, y_vel])"},
             {"role": "user", "content": f"State space: {state}"},
             {"role": "user", "content": f"Available actions: {actions}"},
 #            {"role": "user", "content": f"{closest}"},
-#            {"role": "user", "content": f"From left to right the numbers of the lanes are 1, 2, 3, 4"},
         ],
         response_format=DrivingDecision,
     )
@@ -142,89 +125,75 @@ config = {
     }
 }
 
-def dataclass_to_list(cars):
-#    print(f"Before: {cars}")
-    cars_list = [[cars[0].name, cars[0].x_pos, cars[0].lane, cars[0].x_vel, cars[0].y_vel]]
-
-    for car in cars[1:]:
-#        print(car)
-        cars_list = cars_list + [[car.name, car.x_pos, car.lane, car.x_vel, car.y_vel]]
-
-    print()
-#    print(f"After: {cars_list}")
-    print()
-
-    return cars_list
-
 env = gym.make('highway-v0', render_mode='rgb_array', config=config)
-frames = 0 # Initialize frame counter
-episodes = 1 # Number of episodes to run
+episodes = 5 # Number of episodes to run
 
-async def main():
-    for i in range(0, episodes):
-        # Reset environment to get initial state
-        state, _ = env.reset()
-        frames = 0
-        obs = state
-        done = False
-        ego_vehicle = env.unwrapped.vehicle
+# Create tensorboard logger
+writer = SummaryWriter(f"runs/experiment_{time.time()}")
 
-        while not done:
-            # Save frame locally
-            frame = env.render()
-            Image.fromarray(frame).save(f"{frames}/frame_{frames:05d}.png")
-            frames += 1
+for episode in range(0, episodes):
+    # Reset environment to get initial state
+    state, _ = env.reset()
+    frame_count = 0
+    obs = state
+    done = False
+    frame_list = []
+    speeds = []
 
-            log.write(f"Timestep: {frames}\n\n")
+    # Create folder to save frame images to
+    frames = f"frames/frames_{int(time.time())}"
 
-#            cars = [["Ego vehicle", round(obs[0][1], 4), round(obs[0][2] / 4 + 1), round(obs[0][3], 4), round(obs[0][4], 4)]]
-            cars = [Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
-#            cars = [[obs[0][1] * 100, obs[0][2] * 100, obs[0][3] * 20, obs[0][4] * 20]]
+    # Create new empty folder to save each frame of the environment
+    os.makedirs(frames, exist_ok=True)
 
-            for i in range (1, len(obs[0])):
-#                cars = cars + [[f"Vehicle: {i}", round(obs[i][1], 0), round(obs[i][2] / 4 + 1), round(obs[i][3], 4), round(obs[i][4], 4)]]
-                cars = cars + [Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4))]
+    # Create file to log output to
+    log = open(f"{frames}/log.txt", "w")
 
-            for i in range (0, len(cars)):
-                log.write(f"{cars[i]}\n")
 
-            log.write("\n")
-
-#            print(cars)
-#            closest = closest_same_lane(cars)
-
-#            cars = dataclass_to_list(cars)
-#            print(cars)
-
-            # Prompt ChatGPT with list of cars and prompt and take the specified action
-            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-#            print(response)
-#            print(f"Action: {action}")
-
-            log.write(f"Action: {return_action(action)}\n\n")
-            log.write(f"Response:\n{response}\n\n")
-
-#            result = await Runner.run(
-#                agent,
-#                f"Here is the current state of the environment {cars}. What action should be taken? Also, identify which vehicle is closest to the ego vehicle in it's current lane",
-#                session=session
-#            )
-#            print(result.final_output)
-
-#            next_state, _, terminated, truncated, _ = env.step(1)
-            next_state, _, terminated, truncated, _ = env.step(action)
-            obs = next_state
-            done = terminated or truncated # Episode ends early if a crash occurs
-
-            log.write("-------------------------------------------------\n\n")
-
-        # After episode ends save the last frame
-        # This is necessary to save the frame of a crash
+    while not done:
+        # Save frame to frame list
         frame = env.render()
-        Image.fromarray(frame).save(f"{frames}/frame_{frames:05d}.png")
-        frames += 1
+        frame_list.append(frame)
 
-if __name__ == "__main__":
-	asyncio.run(main())
+        cars = [[Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]]
+        speeds.append(round(obs[0][3], 4))
 
-log.close()
+        for i in range (1, len(obs[0])):
+            cars.append([Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4))])
+
+        # Initialize log with output of all cars
+        log.write(f"Timestep: {frame_count}\n\n")
+        frame_count += 1
+        for i in range (0, len(cars)):
+            log.write(f"{cars[i]}\n")
+
+        log.write("\n")
+
+#        print(cars)
+#        closest = closest_same_lane(cars)
+
+        # Prompt ChatGPT with list of cars and background prompt, then take the specified action
+#        response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
+#        log.write(f"Action: {return_action(action)}\n\n")
+#        log.write(f"Response:\n{response}\n\n")
+
+        next_state, _, terminated, truncated, _ = env.step(1)
+#        next_state, _, terminated, truncated, _ = env.step(action)
+        obs = next_state
+        done = terminated or truncated
+
+        log.write("-------------------------------------------------\n\n")
+
+    # After episode ends save the last frame
+    # This is necessary to save the frame of a crash
+    frame = env.render()
+    frame_list.append(frame)
+
+    # Store saved frames
+    for i in range (0, len(frame_list)):
+        Image.fromarray(frame_list[i]).save(f"{frames}/frame_{i:05d}.png")
+
+    writer.add_scalar(f"Timesteps lasted", frame_count, episode)
+    writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
+
+    log.close()
