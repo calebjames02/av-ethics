@@ -126,7 +126,7 @@ config = {
 }
 
 env = gym.make('highway-v0', render_mode='rgb_array', config=config)
-episodes = 5 # Number of episodes to run
+episodes = 3 # Number of episodes to run
 
 # Create tensorboard logger
 writer = SummaryWriter(f"runs/experiment_{time.time()}")
@@ -149,6 +149,7 @@ for episode in range(0, episodes):
     # Create file to log output to
     log = open(f"{frames}/log.txt", "w")
 
+    print("Episoode: {episode}\n\n")
 
     while not done:
         # Save frame to frame list
@@ -163,6 +164,7 @@ for episode in range(0, episodes):
 
         # Initialize log with output of all cars
         log.write(f"Timestep: {frame_count}\n\n")
+        print(f"Timestep: {frame_count}\n")
         frame_count += 1
         for i in range (0, len(cars)):
             log.write(f"{cars[i]}\n")
@@ -173,12 +175,12 @@ for episode in range(0, episodes):
 #        closest = closest_same_lane(cars)
 
         # Prompt ChatGPT with list of cars and background prompt, then take the specified action
-#        response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-#        log.write(f"Action: {return_action(action)}\n\n")
-#        log.write(f"Response:\n{response}\n\n")
+        response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
+        log.write(f"Action: {return_action(action)}\n\n")
+        log.write(f"Response:\n{response}\n\n")
 
-        next_state, _, terminated, truncated, _ = env.step(1)
-#        next_state, _, terminated, truncated, _ = env.step(action)
+#        next_state, _, terminated, truncated, _ = env.step(1)
+        next_state, _, terminated, truncated, _ = env.step(action)
         obs = next_state
         done = terminated or truncated
 
@@ -195,5 +197,6 @@ for episode in range(0, episodes):
 
     writer.add_scalar(f"Timesteps lasted", frame_count, episode)
     writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
+    writer.flush()
 
     log.close()
