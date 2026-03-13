@@ -8,6 +8,7 @@ from openai import OpenAI
 from PIL import Image
 from pydantic import BaseModel
 from torch.utils.tensorboard import SummaryWriter
+import matplotlib.pyplot as plt
 
 @dataclass
 class Vehicle:
@@ -126,11 +127,13 @@ config = {
 }
 
 env = gym.make('highway-v0', render_mode='rgb_array', config=config)
-episodes = 3 # Number of episodes to run
+episodes = 10 # Number of episodes to run
 
 # Create tensorboard logger
 writer = SummaryWriter(f"runs/experiment_{time.time()}")
 
+crashed = []
+timesteps = []
 for episode in range(0, episodes):
     # Reset environment to get initial state
     state, _ = env.reset()
@@ -149,8 +152,6 @@ for episode in range(0, episodes):
     # Create file to log output to
     log = open(f"{frames}/log.txt", "w")
 
-    print("Episoode: {episode}\n\n")
-
     while not done:
         # Save frame to frame list
         frame = env.render()
@@ -164,7 +165,6 @@ for episode in range(0, episodes):
 
         # Initialize log with output of all cars
         log.write(f"Timestep: {frame_count}\n\n")
-        print(f"Timestep: {frame_count}\n")
         frame_count += 1
         for i in range (0, len(cars)):
             log.write(f"{cars[i]}\n")
@@ -175,12 +175,12 @@ for episode in range(0, episodes):
 #        closest = closest_same_lane(cars)
 
         # Prompt ChatGPT with list of cars and background prompt, then take the specified action
-        response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-        log.write(f"Action: {return_action(action)}\n\n")
-        log.write(f"Response:\n{response}\n\n")
+#        response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
+#        log.write(f"Action: {return_action(action)}\n\n")
+#        log.write(f"Response:\n{response}\n\n")
 
-#        next_state, _, terminated, truncated, _ = env.step(1)
-        next_state, _, terminated, truncated, _ = env.step(action)
+        next_state, _, terminated, truncated, _ = env.step(1)
+#        next_state, _, terminated, truncated, _ = env.step(action)
         obs = next_state
         done = terminated or truncated
 
@@ -191,6 +191,13 @@ for episode in range(0, episodes):
     frame = env.render()
     frame_list.append(frame)
 
+    timesteps.append(frame_count)
+
+    if frame_count == 40:
+        crashed.append(0)
+    else:
+        crashed.append(1)
+
     # Store saved frames
     for i in range (0, len(frame_list)):
         Image.fromarray(frame_list[i]).save(f"{frames}/frame_{i:05d}.png")
@@ -199,4 +206,36 @@ for episode in range(0, episodes):
     writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
     writer.flush()
 
+    if episode == episodes - 1:
+        fig, ax = plt.subplots()
+        ax.bar(["Success rate"], crashed.count(0) / len(crashed) * 100)
+        
+        ax.set_yticks(range(0, 101, 5))
+
+        # Enable tick marks
+        ax.tick_params(axis='both', which='both', length=6)
+
+        ax.set_ylim(0, 100)
+        writer.add_figure("Success rate", fig, 0)
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        ax.bar(["Average timesteps lasted"], sum(timesteps) / len(timesteps))
+        
+        ax.set_yticks(range(0, 41, 2))
+
+        # Enable tick marks
+        ax.tick_params(axis='both', which='both', length=6)
+
+        ax.set_ylim(0, 40)
+        writer.add_figure("Average timesteps lasted", fig, 0)
+        plt.close(fig)
+
+
     log.close()
+
+writer.close()
+
+print(f"Crashed episodes: {crashed.count(1)}")
+print(f"Non crashed episodes: {crashed.count(0)}")
+print(f"Non crashed percentage: {crashed.count(0) / len(crashed) * 100}%")
