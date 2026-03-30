@@ -1,5 +1,37 @@
 from dataclasses import dataclass
 
+import json
+import os
+
+SETTINGS_FILE = "settings.json"
+
+DEFAULT_SETTINGS = {
+    "tensorboard_writer": "experiment",
+    "tensorboard_directory": "runs",
+    "output_folder": "frames",
+}
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            return json.load(f)
+    else:
+        return DEFAULT_SETTINGS.copy()
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=4)
+
+# Load settings
+settings = load_settings()
+
+# Example change
+settings["timeout"] = 60
+
+# Save settings
+save_settings(settings)
+
+"""
 @dataclass
 class Vehicle:
     name: str
@@ -8,17 +40,13 @@ class Vehicle:
     x_vel: float
     y_vel: float
 
-    """
-    Purpose: Return whether or not the calling vehicle is in front of the 'other' vehicle
-                Used in closest_same_lane function
-    """
+#    Purpose: Return whether or not the calling vehicle is in front of the 'other' vehicle
+#                Used in closest_same_lane function
     def is_ahead_of(self, other):
         return self.x_pos > other.x_pos and self.lane == other.lane
 
-    """
-    Purpose: Return how many seconds it will take for the calling vehicle to crash into the given vehicle
-                Return infinity if no collision will ever occur given current positions and speeds
-    """
+#    Purpose: Return how many seconds it will take for the calling vehicle to crash into the given vehicle
+#                Return infinity if no collision will ever occur given current positions and speeds
     def get_ttc(self, lead_car):
         if not lead_car: return float('inf')
 
@@ -30,9 +58,9 @@ class Vehicle:
 
         return rel_dst / rel_vel
 
-"""
-Purpose: From the cars list find the closest vehicle in front of the ego vehicle, if one exists
-"""
+
+# Purpose: From the cars list find the closest vehicle in front of the ego vehicle, if one exists
+
 def closest_same_lane(cars):
     if len(cars) <= 1:
         return None
@@ -113,3 +141,4 @@ run_test("TIME 4", 1.25, cars4[0].get_ttc(closest_same_lane(cars4)))
 run_test("TIME 5", float('inf'), cars5[0].get_ttc(closest_same_lane(cars5)))
 run_test("TIME 6", float('inf'), cars6[0].get_ttc(closest_same_lane(cars6)))
 run_test("TIME 7", float('inf'), cars7[0].get_ttc(closest_same_lane(cars7)))
+"""

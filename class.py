@@ -1,6 +1,7 @@
 import gymnasium as gym
 import highway_env
 import os
+import json
 import time
 from agents import Agent, SQLiteSession
 from dataclasses import dataclass
@@ -115,13 +116,39 @@ def closest_same_lane(cars):
 
     return f"The closest vehicle to the ego vehicle in lane {ego_lane} is {closest_car.name} at position x = {closest_car.x_pos}"
 
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+SETTINGS_FILE = "settings.json"
+
+DEFAULT_SETTINGS = {
+    "tensorboard_writer": "experiment_test",
+    "output_subfolder": "run_test",
+    "output_folder": "frames_test",
+}
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            return json.load(f)
+    else:
+        return DEFAULT_SETTINGS.copy()
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=4)
+
 class Simulator():
-    def __init__(self, writer=f"runs/experiment_{time.time()}", folder=f"frames/frames_{int(time.time())}"):
-        self.writer = SummaryWriter(f"{writer}")
-        self.folder_name = folder
+    def __init__(self):
+        self.settings=load_settings()
+        self.writer = SummaryWriter(self.settings["tensorboard_writer"])
+        self.folder_name = self.settings["output_folder"]
+
+    def __del__(self):
+        self.writer.close()
 
     def test(self, episodes):
-        config = {
+        self.config = {
             "observation": {
                 "type": "Kinematics",
                 "vehicles_count": 5,
@@ -130,7 +157,6 @@ class Simulator():
                 "normalize": False
             }
         }
-        self.env = gym.make('highway-v0', render_mode='rgb_array', config=config)
 
         self.crashed = []
         self.timesteps = []
@@ -143,10 +169,12 @@ class Simulator():
             self.writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
             self.writer.flush()
 
+        print(f"Success rate: {self.crashed.count(0) / len(self.crashed) * 100}%")
+        print(f"Average timesteps lasted: {sum(self.timesteps) / len(self.timesteps)}\n")
         self.make_plot(self.crashed.count(0) / len(self.crashed) * 100, "Success rate", 100, 101, 5)
         self.make_plot(sum(self.timesteps) / len(self.timesteps), "Average timesteps lasted", 40, 41, 2)
 
-        self.writer.close()
+        self.writer.flush()
 
     def make_plot(self, data, title, y_end, y_tick_end, y_tick_amt):
         fig, ax = plt.subplots()
@@ -162,15 +190,17 @@ class Simulator():
         plt.close(fig)
 
     def complete_episode(self):
+        self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
+
         state, _ = self.env.reset()
         frame_count = 0
         obs = state
         done = False
-        frame_list = []
+#        frame_list = []
         speeds = []
 
         # Create folder to save frame images to
-        frames = f"{self.folder_name}/frames_{int(time.time())}"
+        frames = f"{self.folder_name}/%s_{int(time.time())}" % self.settings["output_subfolder"]
 
         # Create new empty folder to save each frame of the environment
         os.makedirs(frames, exist_ok=True)
@@ -181,7 +211,7 @@ class Simulator():
         while not done:
             # Save frame to frame list
             frame = self.env.render()
-            frame_list.append(frame)
+            Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
 
             cars = [[Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]]
             speeds.append(round(obs[0][3], 4))
@@ -215,15 +245,35 @@ class Simulator():
         # After episode ends save the last frame
         # This is necessary to save the frame of a crash
         frame = self.env.render()
-        frame_list.append(frame)
-
-        # Store saved frames
-        for i in range (0, len(frame_list)):
-            Image.fromarray(frame_list[i]).save(f"{frames}/frame_{i:05d}.png")
+        Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
 
         log.close()
+        self.env.close()
 
         return frame_count, speeds
 
 sim = Simulator()
-sim.test(15)
+
+while(1):
+    val = input("0: Exit\n1: Test agent\nYour choice: ")
+
+    if val == "0":
+        break
+
+    print()
+    
+    match val:
+        case "1":
+#            clear_screen()
+            while True:
+                val = input("How many episodes do you want run? (Type '0' to go back): ")
+
+                if val == '0':
+                    break
+
+                try: 
+                    val = int(val)
+                    sim.test(val)
+                except:
+                    print("Invalid input\n")
+#            clear_screen()
