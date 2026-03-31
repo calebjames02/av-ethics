@@ -125,12 +125,24 @@ DEFAULT_SETTINGS = {
     "tensorboard_writer": "experiment_test",
     "output_subfolder": "run_test",
     "output_folder": "frames_test",
+    "a": "a",
+    "e": "e",
+    "i": "i",
+    "o": "o",
+    "u": "u",
 }
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
-            return json.load(f)
+            current = json.load(f)
+            
+            # Add any values that are in the default_settings and not the json file
+            for key, value in DEFAULT_SETTINGS.items():
+                if key not in current:
+                    current[key] = value
+
+            return current
     else:
         return DEFAULT_SETTINGS.copy()
 
@@ -141,13 +153,10 @@ def save_settings(settings):
 class Simulator():
     def __init__(self):
         self.settings=load_settings()
-        self.writer = SummaryWriter(self.settings["tensorboard_writer"])
         self.folder_name = self.settings["output_folder"]
+        self.run_count = 1
+        self.time = time.time()
 
-    def __del__(self):
-        self.writer.close()
-
-    def test(self, episodes):
         self.config = {
             "observation": {
                 "type": "Kinematics",
@@ -158,8 +167,15 @@ class Simulator():
             }
         }
 
+    def save(self):
+        save_settings(self.settings)
+
+    def test(self, episodes):
+
         self.crashed = []
         self.timesteps = []
+        self.writer = SummaryWriter(f"{self.settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
+        self.run_count += 1
         for episode in range (0, episodes):
             frame_count, speeds = self.complete_episode()
             self.timesteps.append(frame_count)
@@ -175,6 +191,7 @@ class Simulator():
         self.make_plot(sum(self.timesteps) / len(self.timesteps), "Average timesteps lasted", 40, 41, 2)
 
         self.writer.flush()
+        self.writer.close()
 
     def make_plot(self, data, title, y_end, y_tick_end, y_tick_amt):
         fig, ax = plt.subplots()
@@ -264,7 +281,6 @@ while(1):
     
     match val:
         case "1":
-#            clear_screen()
             while True:
                 val = input("How many episodes do you want run? (Type '0' to go back): ")
 
@@ -276,4 +292,5 @@ while(1):
                     sim.test(val)
                 except:
                     print("Invalid input\n")
-#            clear_screen()
+
+sim.save()
