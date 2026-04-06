@@ -207,29 +207,31 @@ for episode in range(0, episodes):
     writer.flush()
 
     if episode == episodes - 1:
-        fig, ax = plt.subplots()
-        ax.bar(["Success rate"], crashed.count(0) / len(crashed) * 100)
+        writer.add_scalar(f"Success rate", crashed.count(0) / len(crashed) * 100, 0)
+        writer.add_scalar(f"Average timesteps lasted", sum(timesteps) / len(timesteps))
+#        fig, ax = plt.subplots()
+#        ax.bar(["Success rate"], crashed.count(0) / len(crashed) * 100)
         
-        ax.set_yticks(range(0, 101, 5))
+#        ax.set_yticks(range(0, 101, 5))
 
         # Enable tick marks
-        ax.tick_params(axis='both', which='both', length=6)
+#        ax.tick_params(axis='both', which='both', length=6)
 
-        ax.set_ylim(0, 100)
-        writer.add_figure("Success rate", fig, 0)
-        plt.close(fig)
+#        ax.set_ylim(0, 100)
+#        writer.add_figure("Success rate", fig, 0)
+#        plt.close(fig)
 
-        fig, ax = plt.subplots()
-        ax.bar(["Average timesteps lasted"], sum(timesteps) / len(timesteps))
+#        fig, ax = plt.subplots()
+#        ax.bar(["Average timesteps lasted"], sum(timesteps) / len(timesteps))
         
-        ax.set_yticks(range(0, 41, 2))
+#        ax.set_yticks(range(0, 41, 2))
 
         # Enable tick marks
-        ax.tick_params(axis='both', which='both', length=6)
+#        ax.tick_params(axis='both', which='both', length=6)
 
-        ax.set_ylim(0, 40)
-        writer.add_figure("Average timesteps lasted", fig, 0)
-        plt.close(fig)
+#        ax.set_ylim(0, 40)
+#        writer.add_figure("Average timesteps lasted", fig, 0)
+#        plt.close(fig)
 
 
     log.close()

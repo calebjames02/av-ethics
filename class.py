@@ -116,20 +116,13 @@ def closest_same_lane(cars):
 
     return f"The closest vehicle to the ego vehicle in lane {ego_lane} is {closest_car.name} at position x = {closest_car.x_pos}"
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
-
 SETTINGS_FILE = "settings.json"
 
 DEFAULT_SETTINGS = {
     "tensorboard_writer": "experiment_test",
-    "output_subfolder": "run_test",
     "output_folder": "frames_test",
-    "a": "a",
-    "e": "e",
-    "i": "i",
-    "o": "o",
-    "u": "u",
+    "output_subfolder": "run_test",
+    "save_frame_images": "true"
 }
 
 def load_settings():
@@ -171,7 +164,6 @@ class Simulator():
         save_settings(self.settings)
 
     def test(self, episodes):
-
         self.crashed = []
         self.timesteps = []
         self.writer = SummaryWriter(f"{self.settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
@@ -209,15 +201,15 @@ class Simulator():
     def complete_episode(self):
         self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
 
+        self.use_gpt = 0
         state, _ = self.env.reset()
         frame_count = 0
         obs = state
         done = False
-#        frame_list = []
         speeds = []
 
         # Create folder to save frame images to
-        frames = f"{self.folder_name}/%s_{int(time.time())}" % self.settings["output_subfolder"]
+        frames = f"{self.folder_name}/{self.settings['output_subfolder']}_{int(time.time())}"
 
         # Create new empty folder to save each frame of the environment
         os.makedirs(frames, exist_ok=True)
@@ -228,7 +220,8 @@ class Simulator():
         while not done:
             # Save frame to frame list
             frame = self.env.render()
-            Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
+            if self.settings["save_frame_images"] == "True":
+                Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
 
             cars = [[Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]]
             speeds.append(round(obs[0][3], 4))
@@ -244,16 +237,15 @@ class Simulator():
 
             log.write("\n")
 
-#            print(cars)
-#            closest = closest_same_lane(cars)
-
+            if self.use_gpt:
             # Prompt ChatGPT with list of cars and background prompt, then take the specified action
-#            response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-#            log.write(f"Action: {return_action(action)}\n\n")
-#            log.write(f"Response:\n{response}\n\n")
+                response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
+                log.write(f"Action: {return_action(action)}\n\n")
+                log.write(f"Response:\n{response}\n\n")
+                next_state, _, terminated, truncated, _ = self.env.step(action)
+            else:
+                next_state, _, terminated, truncated, _ = self.env.step(1)
 
-            next_state, _, terminated, truncated, _ = self.env.step(1)
-#            next_state, _, terminated, truncated, _ = self.env.step(action)
             obs = next_state
             done = terminated or truncated
 
@@ -262,17 +254,84 @@ class Simulator():
         # After episode ends save the last frame
         # This is necessary to save the frame of a crash
         frame = self.env.render()
-        Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
+        if self.settings["save_frame_images"] == "True":
+            Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
 
         log.close()
         self.env.close()
 
         return frame_count, speeds
 
+    def modify_general(self):
+        done = 0
+        while 1:
+            print("Current settings:")
+            settings_list = {}
+            count = 1
+            for thing in self.settings:
+                settings_list[count] = (thing, self.settings[thing])
+                count += 1
+
+            print("0: Exit")
+            for thing in settings_list:
+                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
+            print()
+
+#            while 1:
+            val = input("Which setting would you like to modify?: ")
+
+            try:
+                val = int(val)
+                if(val < 0 or val > len(settings_list)):
+                    print("Number entered is out of valid range\n")
+                else:
+                    if val == 0:
+                        return
+                    print()
+                    if settings_list[val][0] == "save_frame_images":
+                        self.modify_general_item_set(settings_list[val], {"1": "True", "2": "False"})
+                    else:
+                        self.modify_general_item(settings_list[val])
+#                   done = 1
+            except:
+                print("Textual input is not valid\n")
+
+            time.sleep(1)
+
+    def modify_general_item_set(self, setting, options):
+        print(f"{setting[0]} is currently {setting[1]}")
+        while 1:
+            print("What would you like to change it to? ", end="")
+            for key in options:
+                print(f"{key}: {options[key]} ", end="")
+            val = input("\nYour response: ")
+
+            print()
+            print(f"You entered: '{options[val]}'")
+            done = input("Is this correct? Yes: 1 No: 2\nYour response: ")
+            print()
+            if done == "1":
+                break
+
+        self.settings[setting[0]] = options[val]
+
+    def modify_general_item(self, setting):
+        print(f"{setting[0]} is currently {setting[1]}")
+        while 1:
+            val = input("What would you like to change it to?: ")
+            print()
+            print(f"You entered: '{val}'")
+            done = input("Is this correct? Yes: 1 No: 2\nResponse: ")
+            print()
+            if done == "1":
+                break
+
+        self.settings[setting[0]] = val
+
 sim = Simulator()
 
 while(1):
-    val = input("0: Exit\n1: Test agent\nYour choice: ")
+    val = input("0: Exit\n1: General settings\n2: Graphs\n3: Test agent\nYour choice: ")
 
     if val == "0":
         break
@@ -281,6 +340,10 @@ while(1):
     
     match val:
         case "1":
+            sim.modify_general()
+        case "2":
+            sim.modify_graphs()
+        case "3":
             while True:
                 val = input("How many episodes do you want run? (Type '0' to go back): ")
 
