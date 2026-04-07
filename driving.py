@@ -2,6 +2,8 @@ import gymnasium as gym
 import highway_env
 import os
 import time
+import numpy as np
+import matplotlib.ticker as ticker
 from agents import Agent, SQLiteSession
 from dataclasses import dataclass
 from openai import OpenAI
@@ -127,13 +129,47 @@ config = {
 }
 
 env = gym.make('highway-v0', render_mode='rgb_array', config=config)
-episodes = 10 # Number of episodes to run
+episodes = 20 # Number of episodes to run
 
 # Create tensorboard logger
 writer = SummaryWriter(f"runs/experiment_{time.time()}")
 
+def graph_plots(graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+    fig, ax = plt.subplots()
+    ax.plot(x_data, y_data)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    plt.title(graph_title)
+
+    ax.set_yticks(range(y_start, y_end, y_amt))
+
+    # Enable tick marks
+    ax.tick_params(axis='both', which='both', length=6)
+
+    ax.set_ylim(min(y_data), max(y_data))
+    ax.set_xticks(range(x_start, x_end, x_amt))
+
+    plt.savefig(f"{graph_title}.png")
+
+def graph_plot_point(x_data, y_data, x_label, y_label, graph_title):
+    fig, ax = plt.subplots(figsize=(4, 6))
+    ax.bar([x_data], [y_data])
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    plt.title(graph_title)
+
+    ax.set_xlim(x_data, x_data)
+    ax.set_xticks(range(0, 0, 1))
+    ax.set_ylim(y_data - 1, y_data + 1)
+
+    plt.tight_layout()
+    plt.savefig(f"{graph_title}.png")
+
 crashed = []
 timesteps = []
+speed = []
 for episode in range(0, episodes):
     # Reset environment to get initial state
     state, _ = env.reset()
@@ -203,10 +239,19 @@ for episode in range(0, episodes):
         Image.fromarray(frame_list[i]).save(f"{frames}/frame_{i:05d}.png")
 
     writer.add_scalar(f"Timesteps lasted", frame_count, episode)
-    writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
+#    writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
+    speed.append(sum(speeds) / len(speeds))
+
     writer.flush()
 
     if episode == episodes - 1:
+        x = list(range(episodes))
+        graph_plots("Episode Speed", x, speed, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
+        graph_plots("Timesteps Lasted", x, timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
+        graph_plot_point(0, sum(timesteps) / len(timesteps), "", "Timesteps", "Average Timesteps Lasted")
+        graph_plot_point(0, crashed.count(0) / len(crashed) * 100, "", "Success Rate %", "Average Success Rate")
+#        graph_plots("Average Timesteps Lasted", 0, [sum(timesteps) / len(timesteps)], "", "Timesteps", 0, 0, 1, 0, 41, 2)
+
         writer.add_scalar(f"Success rate", crashed.count(0) / len(crashed) * 100, 0)
         writer.add_scalar(f"Average timesteps lasted", sum(timesteps) / len(timesteps))
 #        fig, ax = plt.subplots()

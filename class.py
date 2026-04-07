@@ -10,6 +10,7 @@ from PIL import Image
 from pydantic import BaseModel
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
+import numpy as np
 
 @dataclass
 class Vehicle:
@@ -143,6 +144,39 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
+def graph_plots(graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+    fig, ax = plt.subplots()
+    ax.plot(x_data, y_data)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    plt.title(graph_title)
+
+    ax.set_yticks(range(y_start, y_end, y_amt))
+
+    # Enable tick marks
+    ax.tick_params(axis='both', which='both', length=6)
+
+    ax.set_ylim(min(y_data), max(y_data))
+    ax.set_xticks(range(x_start, x_end, x_amt))
+
+    plt.savefig(f"{graph_title}.png")
+
+def graph_plot_point(x_data, y_data, x_label, y_label, graph_title):
+    fig, ax = plt.subplots(figsize=(4, 6))
+    ax.bar([x_data], [y_data])
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    plt.title(graph_title)
+
+    ax.set_xlim(x_data, x_data)
+    ax.set_xticks(range(0, 0, 1))
+    ax.set_ylim(y_data - 1, y_data + 1)
+
+    plt.tight_layout()
+    plt.savefig(f"{graph_title}.png")
+
 class Simulator():
     def __init__(self):
         self.settings=load_settings()
@@ -166,21 +200,24 @@ class Simulator():
     def test(self, episodes):
         self.crashed = []
         self.timesteps = []
+        self.speeds = []
         self.writer = SummaryWriter(f"{self.settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
         self.run_count += 1
         for episode in range (0, episodes):
-            frame_count, speeds = self.complete_episode()
+            frame_count, episode_speeds = self.complete_episode()
+            self.speeds.append(sum(episode_speeds) / len(episode_speeds))
             self.timesteps.append(frame_count)
             self.crashed.append(0 if frame_count == 40 else 1)
 
             self.writer.add_scalar(f"Timesteps lasted", frame_count, episode)
-            self.writer.add_scalar(f"Average Speed", sum(speeds) / len(speeds), episode)
+            self.writer.add_scalar(f"Average Speed", sum(episode_speeds) / len(episode_speeds), episode)
             self.writer.flush()
 
-        print(f"Success rate: {self.crashed.count(0) / len(self.crashed) * 100}%")
-        print(f"Average timesteps lasted: {sum(self.timesteps) / len(self.timesteps)}\n")
-        self.make_plot(self.crashed.count(0) / len(self.crashed) * 100, "Success rate", 100, 101, 5)
-        self.make_plot(sum(self.timesteps) / len(self.timesteps), "Average timesteps lasted", 40, 41, 2)
+        x = list(range(episodes))
+        graph_plots("Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
+        graph_plots("Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
+        graph_plot_point(0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", "Average Timesteps Lasted")
+        graph_plot_point(0, self.crashed.count(0) / len(self.crashed) * 100, "", "Success Rate %", "Average Success Rate")
 
         self.writer.flush()
         self.writer.close()
@@ -327,6 +364,9 @@ class Simulator():
                 break
 
         self.settings[setting[0]] = val
+
+    def modify_graphs(self):
+        pass
 
 sim = Simulator()
 
