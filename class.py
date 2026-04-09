@@ -124,8 +124,8 @@ DEFAULT_SETTINGS = {
     "tensorboard_writer": "experiment_test",
     "output_folder": "frames_test",
     "output_subfolder": "run_test",
-    "save_frame_images": True,},
-    "graph_settings": {
+    "save_frame_images": True,
+    }, "graph_settings": {
         "average_success_rate": True,
         "average_timesteps_lasted": True,
         "episode_speed": True,
@@ -240,19 +240,6 @@ class Simulator():
         self.writer.flush()
         self.writer.close()
 
-#    def make_plot(self, data, title, y_end, y_tick_end, y_tick_amt):
-#        fig, ax = plt.subplots()
-#        ax.bar([f"{title}"], data)
-                
-#        ax.set_yticks(range(0, y_tick_end, y_tick_amt))
-
-        # Enable tick marks
-#        ax.tick_params(axis='both', which='both', length=6)
-
-#        ax.set_ylim(0, y_end)
-#        self.writer.add_figure(f"{title}", fig, 0)
-#        plt.close(fig)
-
     def complete_episode(self):
         self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
 
@@ -350,7 +337,41 @@ class Simulator():
 
             time.sleep(1)
 
-    def modify_general_item(self, setting):
+    def modify_settings(self, setting_val):
+        setting_subtype = self.settings[setting_val]
+        while 1:
+            print("Current settings:")
+            settings_list = {}
+            count = 1
+            for thing in setting_subtype:
+                settings_list[count] = (thing, setting_subtype[thing])
+                count += 1
+
+            print("0: Exit")
+            for thing in settings_list:
+                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
+            print()
+
+            val = input("Which setting would you like to modify?: ")
+
+            try:
+                val = int(val)
+                if(val < 0 or val > len(settings_list)):
+                    print("Number entered is out of valid range\n")
+                else:
+                    if val == 0:
+                        return
+                    print()
+                    if settings_list[val][1] == True or settings_list[val][1] == False:
+                        self.modify_item_set(settings_list[val], setting_subtype, {"1": True, "2": False})
+                    else:
+                        self.modify_item(settings_list[val], setting_subtype)
+            except:
+                print("Textual input is not valid\n")
+
+            time.sleep(1)
+
+    def modify_item(self, setting, setting_class):
         print(f"{setting[0]} is currently {setting[1]}")
         while 1:
             val = input("What would you like to change it to?: ")
@@ -361,7 +382,7 @@ class Simulator():
             if done == "1":
                 break
 
-        self.general_settings[setting[0]] = val
+        setting_class[setting[0]] = val
 
     def modify_graphs(self):
         while 1:
@@ -425,9 +446,11 @@ while(1):
     
     match val:
         case "1":
-            sim.modify_general()
+            sim.modify_settings("general_settings")
+#            sim.modify_general()
         case "2":
-            sim.modify_graphs()
+            sim.modify_settings("graph_settings")
+#            sim.modify_graphs()
         case "3":
             while True:
                 val = input("How many episodes do you want run? (Type '0' to go back): ")
