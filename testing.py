@@ -6,9 +6,14 @@ import os
 SETTINGS_FILE = "settings.json"
 
 DEFAULT_SETTINGS = {
+    "generalSettings": {
     "tensorboard_writer": "experiment",
     "tensorboard_directory": "runs",
     "output_folder": "frames",
+    }, "graphSettings": {
+        "graph1": True,
+        "graph2": False
+    }
 }
 
 def load_settings():
@@ -24,9 +29,17 @@ def save_settings(settings):
 
 # Load settings
 settings = load_settings()
+generalSettings = settings["generalSettings"]
+
+for thing in generalSettings:
+    print(thing, generalSettings[thing])
+print(generalSettings)
+settings["generalSettings"]["tensorboard_writer"] = "experiment"
+#generalSettings["tensorboard_writer"] = "experiment"
+print(generalSettings)
 
 # Example change
-settings["timeout"] = 60
+#settings["timeout"] = 60
 
 # Save settings
 save_settings(settings)

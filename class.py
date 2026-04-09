@@ -120,10 +120,17 @@ def closest_same_lane(cars):
 SETTINGS_FILE = "settings.json"
 
 DEFAULT_SETTINGS = {
+    "general_settings": {
     "tensorboard_writer": "experiment_test",
     "output_folder": "frames_test",
     "output_subfolder": "run_test",
-    "save_frame_images": "true"
+    "save_frame_images": True,},
+    "graph_settings": {
+        "average_success_rate": True,
+        "average_timesteps_lasted": True,
+        "episode_speed": True,
+        "timesteps_lasted": True,
+    }
 }
 
 def load_settings():
@@ -144,7 +151,10 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
-def graph_plots(graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+def graph_plots(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+    if not enabled:
+        return
+
     fig, ax = plt.subplots()
     ax.plot(x_data, y_data)
 
@@ -160,11 +170,14 @@ def graph_plots(graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x
     ax.set_ylim(min(y_data), max(y_data))
     ax.set_xticks(range(x_start, x_end, x_amt))
 
-    plt.savefig(f"{graph_title}.png")
+    plt.savefig(f"{folder_path}/{graph_title}.png")
 
-def graph_plot_point(x_data, y_data, x_label, y_label, graph_title):
+def graph_plot_point(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, y_max):
+    if not enabled:
+        return
+
     fig, ax = plt.subplots(figsize=(4, 6))
-    ax.bar([x_data], [y_data])
+    ax.bar([x_data], max([0.005], [y_data]))
 
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
@@ -172,15 +185,17 @@ def graph_plot_point(x_data, y_data, x_label, y_label, graph_title):
 
     ax.set_xlim(x_data, x_data)
     ax.set_xticks(range(0, 0, 1))
-    ax.set_ylim(y_data - 1, y_data + 1)
+    ax.set_ylim(max(0, y_data - 1), min(y_max, y_data + 1))
 
     plt.tight_layout()
-    plt.savefig(f"{graph_title}.png")
+    plt.savefig(f"{folder_path}/{graph_title}.png")
 
 class Simulator():
     def __init__(self):
         self.settings=load_settings()
-        self.folder_name = self.settings["output_folder"]
+        self.graph_settings = self.settings["graph_settings"]
+        self.general_settings = self.settings["general_settings"]
+        self.folder_name = self.general_settings["output_folder"]
         self.run_count = 1
         self.time = time.time()
 
@@ -201,9 +216,10 @@ class Simulator():
         self.crashed = []
         self.timesteps = []
         self.speeds = []
-        self.writer = SummaryWriter(f"{self.settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
+        self.writer = SummaryWriter(f"{self.general_settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
         self.run_count += 1
         for episode in range (0, episodes):
+            self.episode_folder = f"{self.folder_name}/{self.general_settings['output_subfolder']}_{int(time.time())}"
             frame_count, episode_speeds = self.complete_episode()
             self.speeds.append(sum(episode_speeds) / len(episode_speeds))
             self.timesteps.append(frame_count)
@@ -214,26 +230,28 @@ class Simulator():
             self.writer.flush()
 
         x = list(range(episodes))
-        graph_plots("Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
-        graph_plots("Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
-        graph_plot_point(0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", "Average Timesteps Lasted")
-        graph_plot_point(0, self.crashed.count(0) / len(self.crashed) * 100, "", "Success Rate %", "Average Success Rate")
+        self.episode_graph_folder = self.episode_folder + "/graphs"
+        os.makedirs(self.episode_graph_folder, exist_ok=True)
+        graph_plots(self.graph_settings["episode_speed"], self.episode_graph_folder, "Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
+        graph_plots(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
+        graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", 0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", 40, )
+        graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", 0, self.crashed.count(0) / len(self.crashed) * 100, "", "Success Rate %", 100)
 
         self.writer.flush()
         self.writer.close()
 
-    def make_plot(self, data, title, y_end, y_tick_end, y_tick_amt):
-        fig, ax = plt.subplots()
-        ax.bar([f"{title}"], data)
+#    def make_plot(self, data, title, y_end, y_tick_end, y_tick_amt):
+#        fig, ax = plt.subplots()
+#        ax.bar([f"{title}"], data)
                 
-        ax.set_yticks(range(0, y_tick_end, y_tick_amt))
+#        ax.set_yticks(range(0, y_tick_end, y_tick_amt))
 
         # Enable tick marks
-        ax.tick_params(axis='both', which='both', length=6)
+#        ax.tick_params(axis='both', which='both', length=6)
 
-        ax.set_ylim(0, y_end)
-        self.writer.add_figure(f"{title}", fig, 0)
-        plt.close(fig)
+#        ax.set_ylim(0, y_end)
+#        self.writer.add_figure(f"{title}", fig, 0)
+#        plt.close(fig)
 
     def complete_episode(self):
         self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
@@ -246,19 +264,19 @@ class Simulator():
         speeds = []
 
         # Create folder to save frame images to
-        frames = f"{self.folder_name}/{self.settings['output_subfolder']}_{int(time.time())}"
+        frames = self.episode_folder
 
         # Create new empty folder to save each frame of the environment
-        os.makedirs(frames, exist_ok=True)
+        os.makedirs(self.episode_folder, exist_ok=True)
 
         # Create file to log output to
-        log = open(f"{frames}/log.txt", "w")
+        log = open(f"{self.episode_folder}/log.txt", "w")
 
         while not done:
             # Save frame to frame list
             frame = self.env.render()
-            if self.settings["save_frame_images"] == "True":
-                Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
+            if self.general_settings["save_frame_images"]:
+                Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
 
             cars = [[Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]]
             speeds.append(round(obs[0][3], 4))
@@ -291,8 +309,8 @@ class Simulator():
         # After episode ends save the last frame
         # This is necessary to save the frame of a crash
         frame = self.env.render()
-        if self.settings["save_frame_images"] == "True":
-            Image.fromarray(frame).save(f"{frames}/frame_{frame_count:05d}.png")
+        if self.general_settings["save_frame_images"]:
+            Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
 
         log.close()
         self.env.close()
@@ -300,13 +318,12 @@ class Simulator():
         return frame_count, speeds
 
     def modify_general(self):
-        done = 0
         while 1:
             print("Current settings:")
             settings_list = {}
             count = 1
-            for thing in self.settings:
-                settings_list[count] = (thing, self.settings[thing])
+            for thing in self.general_settings:
+                settings_list[count] = (thing, self.general_settings[thing])
                 count += 1
 
             print("0: Exit")
@@ -314,7 +331,6 @@ class Simulator():
                 print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
             print()
 
-#            while 1:
             val = input("Which setting would you like to modify?: ")
 
             try:
@@ -325,17 +341,62 @@ class Simulator():
                     if val == 0:
                         return
                     print()
-                    if settings_list[val][0] == "save_frame_images":
-                        self.modify_general_item_set(settings_list[val], {"1": "True", "2": "False"})
+                    if settings_list[val][1] == True or settings_list[val][1] == False:
+                        self.modify_item_set(settings_list[val], self.general_settings, {"1": True, "2": False})
                     else:
                         self.modify_general_item(settings_list[val])
-#                   done = 1
             except:
                 print("Textual input is not valid\n")
 
             time.sleep(1)
 
-    def modify_general_item_set(self, setting, options):
+    def modify_general_item(self, setting):
+        print(f"{setting[0]} is currently {setting[1]}")
+        while 1:
+            val = input("What would you like to change it to?: ")
+            print()
+            print(f"You entered: '{val}'")
+            done = input("Is this correct? Yes: 1 No: 2\nResponse: ")
+            print()
+            if done == "1":
+                break
+
+        self.general_settings[setting[0]] = val
+
+    def modify_graphs(self):
+        while 1:
+            print("Current settings:")
+            settings_list = {}
+            count = 1
+            for thing in self.graph_settings:
+                settings_list[count] = (thing, self.graph_settings[thing])
+                count += 1
+
+            print("0: Exit")
+            for thing in settings_list:
+                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
+            print()
+
+            val = input("Which setting would you like to modify?: ")
+
+            try:
+                val = int(val)
+                if(val < 0 or val > len(settings_list)):
+                    print("Number entered is out of valid range\n")
+                else:
+                    if val == 0:
+                        return
+                    print()
+                    if settings_list[val][1] == True or settings_list[val][1] == False:
+                        self.modify_item_set(settings_list[val], self.graph_settings, {"1": True, "2": False})
+                    else:
+                        self.modify_general_item(settings_list[val])
+            except:
+                print("Textual input is not valid\n")
+
+            time.sleep(1)
+
+    def modify_item_set(self, setting, setting_class, options):
         print(f"{setting[0]} is currently {setting[1]}")
         while 1:
             print("What would you like to change it to? ", end="")
@@ -350,23 +411,7 @@ class Simulator():
             if done == "1":
                 break
 
-        self.settings[setting[0]] = options[val]
-
-    def modify_general_item(self, setting):
-        print(f"{setting[0]} is currently {setting[1]}")
-        while 1:
-            val = input("What would you like to change it to?: ")
-            print()
-            print(f"You entered: '{val}'")
-            done = input("Is this correct? Yes: 1 No: 2\nResponse: ")
-            print()
-            if done == "1":
-                break
-
-        self.settings[setting[0]] = val
-
-    def modify_graphs(self):
-        pass
+        setting_class[setting[0]] = options[val]
 
 sim = Simulator()
 
