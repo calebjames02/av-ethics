@@ -121,9 +121,9 @@ SETTINGS_FILE = "settings.json"
 
 DEFAULT_SETTINGS = {
     "general_settings": {
-    "tensorboard_writer": "experiment_test",
-    "output_folder": "frames_test",
-    "output_subfolder": "run_test",
+    "tensorboard_writer": "runs",
+    "output_folder": "frames",
+    "output_subfolder": "run",
     "save_frame_images": True,
     }, "graph_settings": {
         "average_success_rate": True,
@@ -151,7 +151,7 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
-def graph_plots(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
     if not enabled:
         return
 
@@ -213,13 +213,11 @@ class Simulator():
         save_settings(self.settings)
 
     def test(self, episodes):
-        self.crashed = []
-        self.timesteps = []
-        self.speeds = []
+        self.crashed, self.timesteps, self.speeds = ([] for _ in range(3))
         self.writer = SummaryWriter(f"{self.general_settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
-        self.run_count += 1
+        self.test_folder = f"{self.folder_name}/run_{self.run_count}_{time.time()}/"
         for episode in range (0, episodes):
-            self.episode_folder = f"{self.folder_name}/{self.general_settings['output_subfolder']}_{int(time.time())}"
+            self.episode_folder = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode{episode + 1}_{int(time.time())}"
             frame_count, episode_speeds = self.complete_episode()
             self.speeds.append(sum(episode_speeds) / len(episode_speeds))
             self.timesteps.append(frame_count)
@@ -230,15 +228,18 @@ class Simulator():
             self.writer.flush()
 
         x = list(range(episodes))
-        self.episode_graph_folder = self.episode_folder + "/graphs"
+        self.episode_graph_folder = self.test_folder + "graphs"
         os.makedirs(self.episode_graph_folder, exist_ok=True)
-        graph_plots(self.graph_settings["episode_speed"], self.episode_graph_folder, "Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
-        graph_plots(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
+        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
+        graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
         graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", 0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", 40, )
         graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", 0, self.crashed.count(0) / len(self.crashed) * 100, "", "Success Rate %", 100)
 
         self.writer.flush()
         self.writer.close()
+
+        self.run_count += 1
+
 
     def complete_episode(self):
         self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
@@ -304,39 +305,6 @@ class Simulator():
 
         return frame_count, speeds
 
-    def modify_general(self):
-        while 1:
-            print("Current settings:")
-            settings_list = {}
-            count = 1
-            for thing in self.general_settings:
-                settings_list[count] = (thing, self.general_settings[thing])
-                count += 1
-
-            print("0: Exit")
-            for thing in settings_list:
-                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
-            print()
-
-            val = input("Which setting would you like to modify?: ")
-
-            try:
-                val = int(val)
-                if(val < 0 or val > len(settings_list)):
-                    print("Number entered is out of valid range\n")
-                else:
-                    if val == 0:
-                        return
-                    print()
-                    if settings_list[val][1] == True or settings_list[val][1] == False:
-                        self.modify_item_set(settings_list[val], self.general_settings, {"1": True, "2": False})
-                    else:
-                        self.modify_general_item(settings_list[val])
-            except:
-                print("Textual input is not valid\n")
-
-            time.sleep(1)
-
     def modify_settings(self, setting_val):
         setting_subtype = self.settings[setting_val]
         while 1:
@@ -384,39 +352,6 @@ class Simulator():
 
         setting_class[setting[0]] = val
 
-    def modify_graphs(self):
-        while 1:
-            print("Current settings:")
-            settings_list = {}
-            count = 1
-            for thing in self.graph_settings:
-                settings_list[count] = (thing, self.graph_settings[thing])
-                count += 1
-
-            print("0: Exit")
-            for thing in settings_list:
-                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
-            print()
-
-            val = input("Which setting would you like to modify?: ")
-
-            try:
-                val = int(val)
-                if(val < 0 or val > len(settings_list)):
-                    print("Number entered is out of valid range\n")
-                else:
-                    if val == 0:
-                        return
-                    print()
-                    if settings_list[val][1] == True or settings_list[val][1] == False:
-                        self.modify_item_set(settings_list[val], self.graph_settings, {"1": True, "2": False})
-                    else:
-                        self.modify_general_item(settings_list[val])
-            except:
-                print("Textual input is not valid\n")
-
-            time.sleep(1)
-
     def modify_item_set(self, setting, setting_class, options):
         print(f"{setting[0]} is currently {setting[1]}")
         while 1:
@@ -447,10 +382,8 @@ while(1):
     match val:
         case "1":
             sim.modify_settings("general_settings")
-#            sim.modify_general()
         case "2":
             sim.modify_settings("graph_settings")
-#            sim.modify_graphs()
         case "3":
             while True:
                 val = input("How many episodes do you want run? (Type '0' to go back): ")
@@ -458,10 +391,10 @@ while(1):
                 if val == '0':
                     break
 
-                try: 
-                    val = int(val)
-                    sim.test(val)
-                except:
-                    print("Invalid input\n")
+#                try: 
+                val = int(val)
+                sim.test(val)
+#                except:
+#                    print("Invalid input\n")
 
 sim.save()
