@@ -3,14 +3,17 @@ import highway_env
 import os
 import json
 import time
+import instructor
 from agents import Agent, SQLiteSession
 from dataclasses import dataclass
 from openai import OpenAI
 from PIL import Image
 from pydantic import BaseModel
 from torch.utils.tensorboard import SummaryWriter
+from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
 import numpy as np
+from openai import RateLimitError
 
 @dataclass
 class Vehicle:
@@ -21,10 +24,15 @@ class Vehicle:
     y_vel: float
 
 # Access OpenAI API key from key.txt file
-with open("key.txt") as file:
+with open("nautilus_key.txt") as file:
     key = file.readline().strip()
 os.environ["OPENAI_API_KEY"] = key
-client = OpenAI()
+#client = instructor.from_openai(OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), base_url="https://ellm.nrp-nautilus.io/v1"))
+client = instructor.from_openai(
+    OpenAI(api_key=os.environ.get("OPENAI_API_KEY"), base_url="https://ellm.nrp-nautilus.io/v1"),
+    mode=instructor.Mode.MD_JSON # Forces JSON mode + Prompt Injection across compatible APIs
+)
+
 
 # Discrete action space
 ACTIONS_ALL = [
@@ -34,22 +42,14 @@ ACTIONS_ALL = [
     "3: FASTER",
     "4: SLOWER"
 ]
+ACTIONS_ALL_DICT = {
+    0: "LANE_LEFT",
+    1: "IDLE",
+    2: "LANE_RIGHT",
+    3: "FASTER",
+    4: "SLOWER"
 
-def return_action(action):
-    if action == 0:
-        return "LANE_LEFT"
-    
-    if action == 1:
-        return "IDLE"
-    
-    if action == 2:
-        return "LANE_RIGHT"
-    
-    if action == 3:
-        return "FASTER"
-    
-    if action == 4:
-        return "SLOWER"
+}
 
 # Structures the response into a separate explanation and action
 # This ensures the action can be properly identified even if the format of the response changes
@@ -57,18 +57,51 @@ class DrivingDecision(BaseModel):
     explanation: str
     selected_action_index: int
 
-agent = Agent(
-	name="Assistant",
-	instructions="You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning for each action you choose.",
-)
+prompt = """You are an intelligent driving assistant whose goal is to drive safely and efficiently. 
+You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. 
+Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."""
+#CRITICAL: You MUST respond ONLY in raw JSON. 
+#Do NOT wrap your response in markdown code blocks (e.g., ```json). 
+#Do NOT output any conversational text. Your entire response must start with { and end with }."""
 
-session = SQLiteSession("conversation_123")
+def ask_llm(model, prompt, actions, state, closest):
+    # Instead of beta.parse, we use the instructor-patched create method.
+    # This automatically handles prompt injection, schema validation, and retry loops.
+    try:
+        decision_obj = client.chat.completions.create(
+            model=model,
+            response_model=DrivingDecision,
+            max_retries=3,
+            temperature=0.0, # CRITICAL FIX: Forces deterministic output and prevents the infinite whitespace/newline loop
+            max_tokens=1000, # Fail-safe: Prevents the model from hanging for 3 minutes if it does start looping
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"State space: {state}"},
+                {"role": "user", "content": f"Available actions: {actions}"},
+            ],
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+        )
 
+        return decision_obj.explanation, decision_obj.selected_action_index
+
+    except RateLimitError as e:
+        print("⚠️ Rate limited!")
+        print(e)
+
+        # You can implement backoff/retry here
+        return "Rate limited. Try again later.", 1
+
+    except Exception as e:
+        print(f"API Error or Parsing Failure: {e}")
+        # Return fallback safe values so the simulation doesn't crash entirely on API failure
+        return "Fallback due to API parsing error.", 1
+
+"""
 prompt = "You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."
-def ask_chat_gpt(prompt, actions, state, closest):
-    completion = client.beta.chat.completions.parse(
-        model="gpt-4o",
-
+def ask_llm(model, prompt, actions, state, closest):
+    completion = client.chat.completions.create(
+#    completion = client.beta.chat.completions.parse(
+        model=model,
         messages=[
             {"role": "system", "content": prompt},
             # These additional messages give Chat GPT more context on how to interpret what is given to it
@@ -76,12 +109,13 @@ def ask_chat_gpt(prompt, actions, state, closest):
             {"role": "user", "content": f"Available actions: {actions}"},
 #            {"role": "user", "content": f"{closest}"},
         ],
-        response_format=DrivingDecision,
+        response_model=DrivingDecision,
     )
 
-    decision_obj = completion.choices[0].message.parsed
+#    decision_obj = completion.choices[0].message.parsed
 
-    return decision_obj.explanation, decision_obj.selected_action_index
+    return completion.explanation, completion.selected_action_index
+"""
 
 """
 Purpose: From the cars list find the closest vehicle in front of the ego vehicle, if one exists
@@ -125,79 +159,118 @@ DEFAULT_SETTINGS = {
     "output_folder": "frames",
     "output_subfolder": "run",
     "save_frame_images": True,
-    }, "graph_settings": {
+    }, 
+    "graph_settings": {
         "average_success_rate": True,
         "average_timesteps_lasted": True,
         "episode_speed": True,
         "timesteps_lasted": True,
+    },
+    "llm_settings": {
+        "qwen3": False,
+        "gpt-oss": True,
+        "glm-4.7": False,
+        "gemma": False,
+        "olmo": False,
+        "minimax-m2": False,
+        "prompt": "You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning thoroughly for each candidate action before selecting the most optimal action.",
     }
 }
 
 def load_settings():
+    # If SETTINGS_FILE already exists, extract current settings from it
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
             current = json.load(f)
             
             # Add any values that are in the default_settings and not the json file
             for key, value in DEFAULT_SETTINGS.items():
+                # If value type is a dict, expand it and check that all keys of the dictionary are present
+                if type(value) is dict:
+                    for k2, v2 in DEFAULT_SETTINGS[key].items():
+                        if k2 not in current[key]:
+                            current[key][k2] = v2
+                # If value is of a scalar type, update it if missing
                 if key not in current:
                     current[key] = value
 
             return current
+
+    # If SETTINGS_FILE doesn't exist, return DEFAULT_SETTINGS
     else:
         return DEFAULT_SETTINGS.copy()
 
 def save_settings(settings):
+    # Save current version of settings back to SETTINGS_FILE
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
-def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, x_start, x_end, x_amt, y_start, y_end, y_amt):
+def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, y_max):
+    # Don't save graph if it isn't enabled
     if not enabled:
         return
 
-    fig, ax = plt.subplots()
-    ax.plot(x_data, y_data)
+    # If there is only one data point make the graph a bar graph instead of a line graph
+    if len(x_data) == 1:
+        graph_plot_point(enabled, folder_path, graph_title, 0, y_data[0], "", y_label, y_max)
+        return
 
+    # Graph setup
+    fig, ax = plt.subplots()
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     plt.title(graph_title)
 
-    ax.set_yticks(range(y_start, y_end, y_amt))
+    # Plot data
+    ax.plot(list(range(1, len(y_data) + 1)), y_data)
 
-    # Enable tick marks
-    ax.tick_params(axis='both', which='both', length=6)
+    # Set limits for y values
+    ax.set_ylim(max(0, min(y_data) - 1), min(y_max + 0.025, max(y_data) + 1))
 
-    ax.set_ylim(min(y_data), max(y_data))
-    ax.set_xticks(range(x_start, x_end, x_amt))
+    # Ensure tick marks on x axis are only ever whole numbers
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 
+    # Save graph locally
     plt.savefig(f"{folder_path}/{graph_title}.png")
+    plt.close()
 
 def graph_plot_point(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, y_max):
+    # Don't save graph if it isn't enabled
     if not enabled:
         return
 
+    # Graph setup
     fig, ax = plt.subplots(figsize=(4, 6))
-    ax.bar([x_data], max([0.005], [y_data]))
-
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     plt.title(graph_title)
 
-    ax.set_xlim(x_data, x_data)
-    ax.set_xticks(range(0, 0, 1))
+    # Plot data
+    ax.bar([x_data], max(0.005, y_data))
+    
+    # Setup x and y limits, tick marks
+    ax.set_xlim(-1e-12, 1e-12)
     ax.set_ylim(max(0, y_data - 1), min(y_max, y_data + 1))
+    ax.set_xticks(range(0, 0, 1))
 
+    # Save image locally
     plt.tight_layout()
     plt.savefig(f"{folder_path}/{graph_title}.png")
+    plt.close()
+
+def check_valid_action(action):
+    return action in range (0, 5)
 
 class Simulator():
     def __init__(self):
         self.settings=load_settings()
         self.graph_settings = self.settings["graph_settings"]
         self.general_settings = self.settings["general_settings"]
+        self.llm_settings = self.settings["llm_settings"]
+        self.llm_models = self.llm_settings.copy()
+        self.llm_models.pop('prompt')
         self.folder_name = self.general_settings["output_folder"]
         self.run_count = 1
-        self.time = time.time()
 
         self.config = {
             "observation": {
@@ -213,52 +286,50 @@ class Simulator():
         save_settings(self.settings)
 
     def test(self, episodes):
-        self.crashed, self.timesteps, self.speeds = ([] for _ in range(3))
-        self.writer = SummaryWriter(f"{self.general_settings['tensorboard_writer']}/{self.time} - test {self.run_count}")
-        self.test_folder = f"{self.folder_name}/run_{self.run_count}_{time.time()}/"
+        self.timesteps, self.speeds = ([] for _ in range(2))
+        self.test_folder = f"{self.folder_name}/run_{self.run_count}_{int(time.time())}/"
+        os.makedirs(self.test_folder, exist_ok=True)
         for episode in range (0, episodes):
+            print(f"Episode: {episode}")
             self.episode_folder = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode{episode + 1}_{int(time.time())}"
             frame_count, episode_speeds = self.complete_episode()
             self.speeds.append(sum(episode_speeds) / len(episode_speeds))
             self.timesteps.append(frame_count)
-            self.crashed.append(0 if frame_count == 40 else 1)
-
-            self.writer.add_scalar(f"Timesteps lasted", frame_count, episode)
-            self.writer.add_scalar(f"Average Speed", sum(episode_speeds) / len(episode_speeds), episode)
-            self.writer.flush()
 
         x = list(range(episodes))
         self.episode_graph_folder = self.test_folder + "graphs"
         os.makedirs(self.episode_graph_folder, exist_ok=True)
-        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Episode Speed", x, self.speeds, "Episode", "Speed (m/s)", 0, episodes, 1, 20, 26, 1)
-        graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 0, episodes, 1, 0, 40, 2)
+        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", x, self.speeds, "Episode", "Speed (m/s)", 25)
+        graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 40)
         graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", 0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", 40, )
-        graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", 0, self.crashed.count(0) / len(self.crashed) * 100, "", "Success Rate %", 100)
-
-        self.writer.flush()
-        self.writer.close()
+        graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", 0, self.timesteps.count(40) / len(self.timesteps) * 100, "", "Success Rate %", 100)
 
         self.run_count += 1
 
-
     def complete_episode(self):
+        # Create environment
         self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
 
-        self.use_gpt = 0
+        # Variable initialization
         state, _ = self.env.reset()
         frame_count = 0
         obs = state
         done = False
         speeds = []
 
-        # Create folder to save frame images to
-        frames = self.episode_folder
+        # Used to control whether or not LLM is used
+        self.use_llm = True
 
-        # Create new empty folder to save each frame of the environment
+        # Create folder to save each frame of the environment to
         os.makedirs(self.episode_folder, exist_ok=True)
 
         # Create file to log output to
         log = open(f"{self.episode_folder}/log.txt", "w")
+
+        # Set model to be whichever model is selected in settings
+        # If somehow nothing is selected, then default to glm-4.7
+        self.model = next((k for k, v in self.llm_models.items() if v), "glm-4.7")
+        print(self.model)
 
         while not done:
             # Save frame to frame list
@@ -266,30 +337,48 @@ class Simulator():
             if self.general_settings["save_frame_images"]:
                 Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
 
-            cars = [[Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]]
+            # Make list of all cars currently on the road
+            cars = [Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
             speeds.append(round(obs[0][3], 4))
-
-            for i in range (1, len(obs[0])):
-                cars.append([Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4))])
+            for i in range (1, len(obs)):
+                cars.append(Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4)))
 
             # Initialize log with output of all cars
             log.write(f"Timestep: {frame_count}\n\n")
             frame_count += 1
             for i in range (0, len(cars)):
                 log.write(f"{cars[i]}\n")
-
             log.write("\n")
 
-            if self.use_gpt:
-            # Prompt ChatGPT with list of cars and background prompt, then take the specified action
-                response, action = ask_chat_gpt(prompt, ACTIONS_ALL, cars, "")
-                log.write(f"Action: {return_action(action)}\n\n")
-                log.write(f"Response:\n{response}\n\n")
-                next_state, _, terminated, truncated, _ = self.env.step(action)
+            if self.use_llm:
+                # If LLM enabled, prompt LLM with list of cars and background prompt then take the specified action
+                print("Started processing")
+                start = time.time()
+                response, action = ask_llm(self.model, prompt, ACTIONS_ALL, cars, "")
+                end = time.time()
+                print(f"Processing took {end-start} seconds")
+                if check_valid_action(action):
+                    # Take given action in environment
+                    next_state, _, terminated, truncated, _ = self.env.step(action)
+
+                    # Log action and response
+                    log.write(f"Action: {ACTIONS_ALL_DICT[action]}\n\n")
+                    log.write(f"Response:\n{response}\n\n")
+
+                else:
+                    next_state, _, terminated, truncated, _ = self.env.step(1)
+                    log.write(f"Fallback due to invalid action given by LLM. Action: IDLE")
+                    log.write(f"Response:\n{response}\n\n")
             else:
+                # If LLM disabled, take IDLE action
+                print(check_valid_action(1))
                 next_state, _, terminated, truncated, _ = self.env.step(1)
 
+            # Update observations to be the new state
             obs = next_state
+
+            # If all timesteps of the episode have been executed or if the agent crashed then the episode is done
+            # Terminated is true if the agent crashed, truncated is true if the max number of timesteps are reached
             done = terminated or truncated
 
             log.write("-------------------------------------------------\n\n")
@@ -300,10 +389,55 @@ class Simulator():
         if self.general_settings["save_frame_images"]:
             Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
 
+        # Close log file and environment
         log.close()
         self.env.close()
 
         return frame_count, speeds
+
+    def modify_llm_settings(self):
+        while 1:
+            # Set model to be whichever model is selected in settings
+            # If somehow nothing is selected, then default to glm-4.7
+
+            self.model = next((k for k, v in self.llm_models.items() if v), "glm-4.7")
+            print(f"Current model: {self.model}")
+            settings_list = {}
+            count = 1
+            for key, value in self.llm_settings.items():
+                settings_list[count] = (key, value)
+                count += 1
+
+            print("0: Exit")
+            for key, value in settings_list.items():
+                print(f"{key}: {value[0]} = {value[1]}")
+            print()
+
+            val = input("Which setting would you like to modify?: ")
+
+            try:
+                val = int(val)
+                if(val < 0 or val > len(settings_list)):
+                    print("Number entered is out of valid range\n")
+                else:
+                    if val == 0:
+                        return
+
+                    print()
+                    if type(settings_list[val][1]) is bool:
+                        if not settings_list[val][1]:
+                            self.llm_settings[self.model] = False
+                            self.modify_item_set(settings_list[val], self.llm_settings, {"1": True})
+                        else:
+                            print(f"Model {self.model} is already selected, skipping.\n")
+
+                    else:
+                        self.modify_item(settings_list[val], self.llm_settings)
+            except:
+                print("Textual input is not valid\n")
+
+            # Wait one second before looping again to give time for people to read any program output
+            time.sleep(1)
 
     def modify_settings(self, setting_val):
         setting_subtype = self.settings[setting_val]
@@ -311,13 +445,14 @@ class Simulator():
             print("Current settings:")
             settings_list = {}
             count = 1
-            for thing in setting_subtype:
-                settings_list[count] = (thing, setting_subtype[thing])
+
+            for key, value in setting_subtype.items():
+                settings_list[count] = (key, value)
                 count += 1
 
             print("0: Exit")
-            for thing in settings_list:
-                print(f"{thing}: {settings_list[thing][0]} = {settings_list[thing][1]}")
+            for key, value in settings_list.items():
+                print(f"{key}: {value[0]} = {value[1]}")
             print()
 
             val = input("Which setting would you like to modify?: ")
@@ -330,7 +465,7 @@ class Simulator():
                     if val == 0:
                         return
                     print()
-                    if settings_list[val][1] == True or settings_list[val][1] == False:
+                    if type(settings_list[val][1]) is bool:
                         self.modify_item_set(settings_list[val], setting_subtype, {"1": True, "2": False})
                     else:
                         self.modify_item(settings_list[val], setting_subtype)
@@ -340,15 +475,21 @@ class Simulator():
             time.sleep(1)
 
     def modify_item(self, setting, setting_class):
-        print(f"{setting[0]} is currently {setting[1]}")
+        print(f"{setting[0]} is currently: {setting[1]}")
         while 1:
             val = input("What would you like to change it to?: ")
             print()
             print(f"You entered: '{val}'")
-            done = input("Is this correct? Yes: 1 No: 2\nResponse: ")
+            done = input("Is this correct? Yes: 1 No: 2 Cancel: 3\nResponse: ")
             print()
+
+            # If user input is 1, break from loop and save setting
             if done == "1":
                 break
+            # If user input is 3, return from function and don't save setting
+            elif done == "3":
+                return
+            # If user input is 2, the loop continues
 
         setting_class[setting[0]] = val
 
@@ -362,39 +503,41 @@ class Simulator():
 
             print()
             print(f"You entered: '{options[val]}'")
-            done = input("Is this correct? Yes: 1 No: 2\nYour response: ")
+            done = input("Is this correct? Yes: 1 | No: 2 | Cancel: 3\nYour response: ")
             print()
             if done == "1":
                 break
+            elif done == "3":
+                return
 
         setting_class[setting[0]] = options[val]
 
 sim = Simulator()
 
 while(1):
-    val = input("0: Exit\n1: General settings\n2: Graphs\n3: Test agent\nYour choice: ")
-
-    if val == "0":
-        break
-
+    val = input("0: Exit\n1: General settings\n2: LLM Settings\n3: Graphs\n4: Test agent\nYour choice: ")
     print()
     
     match val:
+        case "0":
+            break
         case "1":
             sim.modify_settings("general_settings")
         case "2":
-            sim.modify_settings("graph_settings")
+            sim.modify_llm_settings()
         case "3":
+            sim.modify_settings("graph_settings")
+        case "4":
             while True:
                 val = input("How many episodes do you want run? (Type '0' to go back): ")
 
                 if val == '0':
                     break
 
-#                try: 
-                val = int(val)
-                sim.test(val)
-#                except:
-#                    print("Invalid input\n")
+                try: 
+                    val = int(val)
+                    sim.test(val)
+                except:
+                    print("Invalid input\n")
 
 sim.save()
