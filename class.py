@@ -400,48 +400,59 @@ class Simulator():
 
         return frame_count, speeds
 
-    def modify_llm_settings(self):
+    def modify_llm_settings(self, setting_val):
+        setting_subtype = self.settings[setting_val]
         while 1:
             # Set model to be whichever model is selected in settings
             # If somehow nothing is selected, then default to glm-4.7
             self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
 
-#            settings_list = {}
-#            count = 1
-#            for key, value in self.llm_settings.items():
-#                settings_list[count] = (key, value)
-#                count += 1
-
             print(f"Current model: {self.model}")
+
+            # Print all settings and their values
             print("0: Exit")
             for index, (key, value) in enumerate(self.llm_settings.items(), start=1):
                 print(f"{index}: {key} = {value}")
-#                print(index, key)
-
-#            for key, value in settings_list.items():
-#                print(f"{key}: {value[0]} = {value[1]}")
             print()
 
-            val = input("Which setting would you like to modify?: ")
+            index = input("Which setting would you like to modify?: ")
 
             try:
-                val = int(val)
-                if(val < 0 or val > len(settings_list)):
+                # Convert index to string and make it zero indexed
+                index = int(index)
+
+                # Ensure index is in valid range
+                if(index < 0 or index > len(self.llm_settings)):
                     print("Number entered is out of valid range\n")
                 else:
-                    if val == 0:
+                    # If user input is 0, break from loop
+                    if index == 0:
                         return
 
+                    index -= 1
+
                     print()
-                    if type(settings_list[val][1]) is bool:
-                        if not settings_list[val][1]:
+
+                    # Extract setting key and value from settings list
+                    setting_key = list(self.llm_settings.keys())[index]
+                    setting_val = self.llm_settings[setting_key]
+
+                    # Handle modifying boolean setting
+                    if type(setting_val) is bool:
+                        # If llm model is not enabled then give user option to enable it
+                        if not setting_val:
+                            # Set previously enabled model to false
                             self.llm_settings[self.model] = False
-                            self.modify_item_set(settings_list[val], self.llm_settings, {"1": True})
+
+                            self.modify_item_set([setting_key, setting_val], self.llm_settings, {"1": True})
+                        # If llm model is already enabled then don't change anything
                         else:
                             print(f"Model {self.model} is already selected, skipping.\n")
 
+                    # Handle modifying non boolean setting
                     else:
-                        self.modify_item(settings_list[val], self.llm_settings)
+                        self.modify_item([setting_key, setting_val], self.llm_settings)
+            # Display error message in case of user giving non-numerical input
             except:
                 print("Textual input is not valid\n")
 
@@ -450,37 +461,66 @@ class Simulator():
 
     def modify_settings(self, setting_val):
         setting_subtype = self.settings[setting_val]
+
+        # Check if llm settings are being modified, as certain extra things need to be done if this is true
+        is_llm_setting = setting_val == "llm_settings"
         while 1:
-            print("Current settings:")
-            settings_list = {}
-            count = 1
+            if is_llm_setting:
+                # Set model to be whichever model is selected in settings
+                # If somehow nothing is selected, then default to glm-4.7
+                self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
+                print(f"Current model: {self.model}")
 
-            for key, value in setting_subtype.items():
-                settings_list[count] = (key, value)
-                count += 1
-
+            # Print all settings and their values
             print("0: Exit")
-            for key, value in settings_list.items():
-                print(f"{key}: {value[0]} = {value[1]}")
+            for index, (key, value) in enumerate(setting_subtype.items(), start=1):
+                print(f"{index}: {key} = {value}")
             print()
 
-            val = input("Which setting would you like to modify?: ")
+            index = input("Which setting would you like to modify?: ")
 
             try:
-                val = int(val)
-                if(val < 0 or val > len(settings_list)):
+                # Convert index to string
+                index = int(index)
+
+                # Ensure index is in valid range
+                if(index < 0 or index > len(setting_subtype)):
                     print("Number entered is out of valid range\n")
+
                 else:
-                    if val == 0:
+                    # If user input is 0, break from loop
+                    if index == 0:
                         return
+
+                    # Make index zero indexed
+                    # It's originally not zero indexed to match up with the number of 0 being exit
+                    index -= 1
+
                     print()
-                    if type(settings_list[val][1]) is bool:
-                        self.modify_item_set(settings_list[val], setting_subtype, {"1": True, "2": False})
+
+                    setting_key = list(setting_subtype.keys())[index]
+                    setting_val = setting_subtype[setting_key]
+
+                    if type(setting_val) is bool:
+                        if is_llm_setting:
+                            if not setting_val:
+                                # Set previously enabled model to false
+                                self.llm_settings[self.model] = False
+
+                                self.modify_item_set([setting_key, setting_val], self.llm_settings, {"1": True})
+                            # If llm model is already enabled then don't change anything
+                            else:
+                                print(f"Model {self.model} is already selected, skipping.\n")
+                        else:
+                            self.modify_item_set([setting_key, setting_val], setting_subtype, {"1": True, "2": False})
                     else:
-                        self.modify_item(settings_list[val], setting_subtype)
+                        self.modify_item([setting_key, setting_val], setting_subtype)
+
+            # Display error message in case of user giving non-numerical input
             except:
                 print("Textual input is not valid\n")
 
+            # Wait one second before looping again to give time for people to read any program output
             time.sleep(1)
 
     def modify_item(self, setting, setting_class):
@@ -533,7 +573,7 @@ while(1):
         case "1":
             sim.modify_settings("general_settings")
         case "2":
-            sim.modify_llm_settings()
+            sim.modify_settings("llm_settings")
         case "3":
             sim.modify_settings("graph_settings")
         case "4":
