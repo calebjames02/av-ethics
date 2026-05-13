@@ -13,7 +13,6 @@ from torch.utils.tensorboard import SummaryWriter
 from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
 import numpy as np
-from openai import RateLimitError
 
 @dataclass
 class Vehicle:
@@ -83,13 +82,6 @@ def ask_llm(model, prompt, actions, state, closest):
         )
 
         return decision_obj.explanation, decision_obj.selected_action_index
-
-    except RateLimitError as e:
-        print("⚠️ Rate limited!")
-        print(e)
-
-        # You can implement backoff/retry here
-        return "Rate limited. Try again later.", 1
 
     except Exception as e:
         print(f"API Error or Parsing Failure: {e}")
@@ -216,7 +208,7 @@ def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_lab
         return
 
     # Graph setup
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     plt.title(graph_title)
@@ -267,9 +259,10 @@ class Simulator():
         self.graph_settings = self.settings["graph_settings"]
         self.general_settings = self.settings["general_settings"]
         self.llm_settings = self.settings["llm_settings"]
-        self.llm_models = self.llm_settings.copy()
-        self.llm_models.pop('prompt')
         self.folder_name = self.general_settings["output_folder"]
+
+        # Used to keep track of how many test runs are completed
+        # Doesn't track number of episodes run, instead tracks number of time 1 or more episodes are run
         self.run_count = 1
 
         self.config = {
@@ -286,9 +279,14 @@ class Simulator():
         save_settings(self.settings)
 
     def test(self, episodes):
+        # Create empty lists to track number of timesteps and average speed from each episode
         self.timesteps, self.speeds = ([] for _ in range(2))
+
+        # Make folder for episode output
         self.test_folder = f"{self.folder_name}/run_{self.run_count}_{int(time.time())}/"
         os.makedirs(self.test_folder, exist_ok=True)
+
+        # Run each episode
         for episode in range (0, episodes):
             print(f"Episode: {episode}")
             self.episode_folder = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode{episode + 1}_{int(time.time())}"
@@ -296,9 +294,12 @@ class Simulator():
             self.speeds.append(sum(episode_speeds) / len(episode_speeds))
             self.timesteps.append(frame_count)
 
-        x = list(range(episodes))
+        # Create folder for graphs
         self.episode_graph_folder = self.test_folder + "graphs"
         os.makedirs(self.episode_graph_folder, exist_ok=True)
+
+        # Save all graphs
+        x = list(range(episodes))
         graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", x, self.speeds, "Episode", "Speed (m/s)", 25)
         graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", x, self.timesteps, "Episode", "Timesteps", 40)
         graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", 0, sum(self.timesteps) / len(self.timesteps), "", "Timesteps", 40, )
@@ -318,7 +319,7 @@ class Simulator():
         speeds = []
 
         # Used to control whether or not LLM is used
-        self.use_llm = True
+        self.use_llm = False
 
         # Create folder to save each frame of the environment to
         os.makedirs(self.episode_folder, exist_ok=True)
@@ -328,7 +329,7 @@ class Simulator():
 
         # Set model to be whichever model is selected in settings
         # If somehow nothing is selected, then default to glm-4.7
-        self.model = next((k for k, v in self.llm_models.items() if v), "glm-4.7")
+        self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
         print(self.model)
 
         while not done:
@@ -351,12 +352,14 @@ class Simulator():
             log.write("\n")
 
             if self.use_llm:
+                # Generate list of legal actions and their associated indices using the environment get_available_actions function
+                available = self.env.unwrapped.action_type.get_available_actions()
+                available_actions = [ACTIONS_ALL[action] for action in available]
+
                 # If LLM enabled, prompt LLM with list of cars and background prompt then take the specified action
-                print("Started processing")
-                start = time.time()
-                response, action = ask_llm(self.model, prompt, ACTIONS_ALL, cars, "")
-                end = time.time()
-                print(f"Processing took {end-start} seconds")
+                response, action = ask_llm(self.model, prompt, available_actions, cars, "")
+
+                # Check that LLM hasn't returned an invalid action index
                 if check_valid_action(action):
                     # Take given action in environment
                     next_state, _, terminated, truncated, _ = self.env.step(action)
@@ -366,12 +369,14 @@ class Simulator():
                     log.write(f"Response:\n{response}\n\n")
 
                 else:
+                    # Take given action in environment
                     next_state, _, terminated, truncated, _ = self.env.step(1)
-                    log.write(f"Fallback due to invalid action given by LLM. Action: IDLE")
+
+                    # Log action and response
+                    log.write(f"Fallback due to invalid action given by LLM.\nAction: IDLE")
                     log.write(f"Response:\n{response}\n\n")
             else:
                 # If LLM disabled, take IDLE action
-                print(check_valid_action(1))
                 next_state, _, terminated, truncated, _ = self.env.step(1)
 
             # Update observations to be the new state
@@ -399,18 +404,22 @@ class Simulator():
         while 1:
             # Set model to be whichever model is selected in settings
             # If somehow nothing is selected, then default to glm-4.7
+            self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
 
-            self.model = next((k for k, v in self.llm_models.items() if v), "glm-4.7")
+#            settings_list = {}
+#            count = 1
+#            for key, value in self.llm_settings.items():
+#                settings_list[count] = (key, value)
+#                count += 1
+
             print(f"Current model: {self.model}")
-            settings_list = {}
-            count = 1
-            for key, value in self.llm_settings.items():
-                settings_list[count] = (key, value)
-                count += 1
-
             print("0: Exit")
-            for key, value in settings_list.items():
-                print(f"{key}: {value[0]} = {value[1]}")
+            for index, (key, value) in enumerate(self.llm_settings.items(), start=1):
+                print(f"{index}: {key} = {value}")
+#                print(index, key)
+
+#            for key, value in settings_list.items():
+#                print(f"{key}: {value[0]} = {value[1]}")
             print()
 
             val = input("Which setting would you like to modify?: ")
