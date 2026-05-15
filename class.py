@@ -32,7 +32,6 @@ client = instructor.from_openai(
     mode=instructor.Mode.MD_JSON # Forces JSON mode + Prompt Injection across compatible APIs
 )
 
-
 # Discrete action space
 ACTIONS_ALL = [
     "0: LANE_LEFT",
@@ -59,20 +58,16 @@ class DrivingDecision(BaseModel):
 prompt = """You are an intelligent driving assistant whose goal is to drive safely and efficiently. 
 You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. 
 Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."""
-#CRITICAL: You MUST respond ONLY in raw JSON. 
-#Do NOT wrap your response in markdown code blocks (e.g., ```json). 
-#Do NOT output any conversational text. Your entire response must start with { and end with }."""
 
 def ask_llm(model, prompt, actions, state, closest):
-    # Instead of beta.parse, we use the instructor-patched create method.
-    # This automatically handles prompt injection, schema validation, and retry loops.
     try:
         decision_obj = client.chat.completions.create(
             model=model,
             response_model=DrivingDecision,
-            max_retries=3,
-            temperature=0.0, # CRITICAL FIX: Forces deterministic output and prevents the infinite whitespace/newline loop
-            max_tokens=1000, # Fail-safe: Prevents the model from hanging for 3 minutes if it does start looping
+            max_retries=1,
+            temperature=0.0, # Set temperature to 0.0 to force deterministic output
+            max_tokens=1000, # Stop llm from infinitely outputing text
+            timeout=20, # Automatic timeout if processing too slow
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"State space: {state}"},
@@ -89,28 +84,9 @@ def ask_llm(model, prompt, actions, state, closest):
         return "Fallback due to API parsing error.", 1
 
 """
-prompt = "You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."
-def ask_llm(model, prompt, actions, state, closest):
-    completion = client.chat.completions.create(
-#    completion = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": prompt},
-            # These additional messages give Chat GPT more context on how to interpret what is given to it
-            {"role": "user", "content": f"State space: {state}"},
-            {"role": "user", "content": f"Available actions: {actions}"},
-#            {"role": "user", "content": f"{closest}"},
-        ],
-        response_model=DrivingDecision,
-    )
-
-#    decision_obj = completion.choices[0].message.parsed
-
-    return completion.explanation, completion.selected_action_index
-"""
-
-"""
 Purpose: From the cars list find the closest vehicle in front of the ego vehicle, if one exists
+Input: List of cars on the road
+Output: Textual description of position of vehicle closest to ego vehicle
 """
 def closest_same_lane(cars):
     if not cars:
@@ -123,7 +99,7 @@ def closest_same_lane(cars):
     ego_lane = cars[0].lane
     ego_pos = cars[0].x_pos
 
-    # Filter vehicles out of lane_cars list that aren't in the same lane as the ego vehicle
+    # Filter vehicles out of cars list that aren't in the same lane as the ego vehicle
     lane_cars = [car for car in cars if car.lane == ego_lane]
 
     if(len(lane_cars) == 1):
@@ -169,6 +145,10 @@ DEFAULT_SETTINGS = {
     }
 }
 
+"""
+Purpose: Extract current copy of settings from SETTINGS_FILE if it exists, otherwise make a copy of the default settings and return that
+Output: Dictionary containing copy of saved settings, or default settings
+"""
 def load_settings():
     # If SETTINGS_FILE already exists, extract current settings from it
     if os.path.exists(SETTINGS_FILE):
@@ -193,12 +173,59 @@ def load_settings():
         return DEFAULT_SETTINGS.copy()
 
 def save_settings(settings):
-    # Save current version of settings back to SETTINGS_FILE
+    """
+    Save current version of settings to SETTINGS_FILE
+    Should be called whenver program is terminated to save any changes that were made
+
+    Args:
+        settings (dict):
+            Dictionary that contains the current state of all the settings
+
+    Returns:
+        None
+    """
+
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
 def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, y_max):
-    # Don't save graph if it isn't enabled
+    """
+    Create and save a line graph display the passed in data.
+    The chart is saved as a PNG image in the specified folder.
+
+    Args:
+        enabled (bool):
+            Whether graph generation is enabled.
+
+        folder_path (str):
+            Directory where the graph image will be saved.
+
+        graph_title (str):
+            Title of the graph and filename of the output image.
+
+        x_data (float):
+            .
+
+        y_data (float):
+            .
+
+        x_label (str):
+            Label for the x-axis.
+
+        y_label (str):
+            Label for the y-axis.
+
+        y_max (float):
+            Maximum allowed y-axis limit.
+
+    Returns:
+        None
+
+    Notes:
+    """
+
+    # The enabled parameter tracks whether or not the given graph is enabled in settings
+    # If it is not enabled, don't graph it
     if not enabled:
         return
 
@@ -226,8 +253,57 @@ def graph_plot(enabled, folder_path, graph_title, x_data, y_data, x_label, y_lab
     plt.savefig(f"{folder_path}/{graph_title}.png")
     plt.close()
 
-def graph_plot_point(enabled, folder_path, graph_title, x_data, y_data, x_label, y_label, y_max):
-    # Don't save graph if it isn't enabled
+"""
+Purpose: Creates and saves a bar chart containing a single bar
+Input: Enabled - boolean value representing whether or not the graph should be made
+    folder_path - string containing the file path of the folder to save the graph to
+    graph_title - string containing a title for the graph
+    x_data / y_data - numeric data to graph on given axis
+    x_label / y_label - string containing name for given axis
+    y_max - maximum value for y bars
+Output: None
+Notes: A bar graph is used instead of a line graph to make it clearer what the value is
+"""
+def graph_plot_point(enabled, folder_path, graph_title, x_value, y_value, x_label, y_label, y_max):
+    """
+    Create and save a bar chart containing a single data point.
+    The chart is saved as a PNG image in the specified folder.
+
+    Args:
+        enabled (bool):
+            Whether graph generation is enabled.
+
+        folder_path (str):
+            Directory where the graph image will be saved.
+
+        graph_title (str):
+            Title of the graph and filename of the output image.
+
+        x_value (float):
+            X-axis value for the bar position.
+
+        y_value (float):
+            Height of the bar.
+
+        x_label (str):
+            Label for the x-axis.
+
+        y_label (str):
+            Label for the y-axis.
+
+        y_max (float):
+            Maximum allowed y-axis limit.
+
+    Returns:
+        None
+
+    Notes:
+        A minimum bar height of 0.005 is enforced to ensure visibility for very small values.
+        A bar graph is used instead of a line graph to make it clearer what the value is
+    """
+
+    # The enabled parameter tracks whether or not the given graph is enabled in settings
+    # If it is not enabled, don't graph it
     if not enabled:
         return
 
@@ -238,14 +314,18 @@ def graph_plot_point(enabled, folder_path, graph_title, x_data, y_data, x_label,
     plt.title(graph_title)
 
     # Plot data
-    ax.bar([x_data], max(0.005, y_data))
+    ax.bar([x_value], max(0.005, y_value))
     
     # Setup x and y limits, tick marks
     ax.set_xlim(-1e-12, 1e-12)
-    ax.set_ylim(max(0, y_data - 1), min(y_max, y_data + 1))
-    ax.set_xticks(range(0, 0, 1))
 
-    # Save image locally
+    # Disables x ticks
+    ax.set_xticks([])
+    
+    # Keep y limits close to y value, but make sure it is within the range (0, y_max)
+    ax.set_ylim(max(0, y_value - 1), min(y_max, y_value + 1))
+
+    # Save image locally in given folder with given title
     plt.tight_layout()
     plt.savefig(f"{folder_path}/{graph_title}.png")
     plt.close()
@@ -354,18 +434,23 @@ class Simulator():
             if self.use_llm:
                 # Generate list of legal actions and their associated indices using the environment get_available_actions function
                 available = self.env.unwrapped.action_type.get_available_actions()
-                available_actions = [ACTIONS_ALL[action] for action in available]
+                print(frame_count)
+#                print(available)
+                available_actions = [f"{action}: {self.env.unwrapped.action_type.ACTIONS_ALL[action]}" for action in available]
+                available_actions.sort()
 
+#                print(available_actions)
+                print()
                 # If LLM enabled, prompt LLM with list of cars and background prompt then take the specified action
                 response, action = ask_llm(self.model, prompt, available_actions, cars, "")
 
                 # Check that LLM hasn't returned an invalid action index
-                if check_valid_action(action):
+                if action in range(0, 5):
                     # Take given action in environment
                     next_state, _, terminated, truncated, _ = self.env.step(action)
 
                     # Log action and response
-                    log.write(f"Action: {ACTIONS_ALL_DICT[action]}\n\n")
+                    log.write(f"Action: {self.env.unwrapped.action_type.ACTIONS_ALL[action]}\n\n")
                     log.write(f"Response:\n{response}\n\n")
 
                 else:
@@ -376,6 +461,7 @@ class Simulator():
                     log.write(f"Fallback due to invalid action given by LLM.\nAction: IDLE")
                     log.write(f"Response:\n{response}\n\n")
             else:
+                print(self.env.unwrapped.action_type.ACTIONS_ALL)
                 # If LLM disabled, take IDLE action
                 next_state, _, terminated, truncated, _ = self.env.step(1)
 
@@ -399,65 +485,6 @@ class Simulator():
         self.env.close()
 
         return frame_count, speeds
-
-    def modify_llm_settings(self, setting_val):
-        setting_subtype = self.settings[setting_val]
-        while 1:
-            # Set model to be whichever model is selected in settings
-            # If somehow nothing is selected, then default to glm-4.7
-            self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
-
-            print(f"Current model: {self.model}")
-
-            # Print all settings and their values
-            print("0: Exit")
-            for index, (key, value) in enumerate(self.llm_settings.items(), start=1):
-                print(f"{index}: {key} = {value}")
-            print()
-
-            index = input("Which setting would you like to modify?: ")
-
-            try:
-                # Convert index to string and make it zero indexed
-                index = int(index)
-
-                # Ensure index is in valid range
-                if(index < 0 or index > len(self.llm_settings)):
-                    print("Number entered is out of valid range\n")
-                else:
-                    # If user input is 0, break from loop
-                    if index == 0:
-                        return
-
-                    index -= 1
-
-                    print()
-
-                    # Extract setting key and value from settings list
-                    setting_key = list(self.llm_settings.keys())[index]
-                    setting_val = self.llm_settings[setting_key]
-
-                    # Handle modifying boolean setting
-                    if type(setting_val) is bool:
-                        # If llm model is not enabled then give user option to enable it
-                        if not setting_val:
-                            # Set previously enabled model to false
-                            self.llm_settings[self.model] = False
-
-                            self.modify_item_set([setting_key, setting_val], self.llm_settings, {"1": True})
-                        # If llm model is already enabled then don't change anything
-                        else:
-                            print(f"Model {self.model} is already selected, skipping.\n")
-
-                    # Handle modifying non boolean setting
-                    else:
-                        self.modify_item([setting_key, setting_val], self.llm_settings)
-            # Display error message in case of user giving non-numerical input
-            except:
-                print("Textual input is not valid\n")
-
-            # Wait one second before looping again to give time for people to read any program output
-            time.sleep(1)
 
     def modify_settings(self, setting_val):
         setting_subtype = self.settings[setting_val]
@@ -501,8 +528,11 @@ class Simulator():
                     setting_key = list(setting_subtype.keys())[index]
                     setting_val = setting_subtype[setting_key]
 
+                    # Handle modifying boolean setting
                     if type(setting_val) is bool:
+                        # If llm setting is being modified handle it specifically
                         if is_llm_setting:
+                            # If llm model is not enabled then give user option to enable it
                             if not setting_val:
                                 # Set previously enabled model to false
                                 self.llm_settings[self.model] = False
@@ -511,8 +541,12 @@ class Simulator():
                             # If llm model is already enabled then don't change anything
                             else:
                                 print(f"Model {self.model} is already selected, skipping.\n")
+
+                        # Update any non llm setting normally
                         else:
                             self.modify_item_set([setting_key, setting_val], setting_subtype, {"1": True, "2": False})
+
+                    # Handle modifying non boolean setting
                     else:
                         self.modify_item([setting_key, setting_val], setting_subtype)
 
