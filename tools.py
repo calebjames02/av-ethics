@@ -8,19 +8,19 @@ class Vehicle:
     x_vel: float
     y_vel: float
 
-"""
-Purpose: From the cars list find the closest vehicle in front of the ego vehicle, if one exists
-Input: List of cars on the road
-Output: Textual description of position of vehicle closest to ego vehicle
-"""
-def closest_same_lane(cars):
+def closest_same_lane(
+        cars: list[Vehicle]
+    ) -> str:
+    """
+    From the cars list find the closest vehicle in front of the ego vehicle, if one exists, and return a textual description of it
+    """
+
     if not cars:
         return "No cars currently exist"
 
     if len(cars) == 1:
         return "Only the ego vehicle exists"
 
-    # Mark down ego lane and position for future access
     ego_lane = cars[0].lane
     ego_pos = cars[0].x_pos
 

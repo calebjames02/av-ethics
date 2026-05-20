@@ -3,6 +3,7 @@ import instructor
 from agents import Agent, SQLiteSession
 from openai import OpenAI
 from pydantic import BaseModel
+from tools import Vehicle
 
 # Access OpenAI API key from key.txt file
 with open("nautilus_key.txt") as file:
@@ -16,7 +17,7 @@ client = instructor.from_openai(
 )
 
 # Structures the response into a separate explanation and action
-# This ensures the action can be properly identified even if the format of the response changes
+# This ensures the action can be properly identified even if the exact format of the response changes
 class DrivingDecision(BaseModel):
     explanation: str
     selected_action_index: int
@@ -25,28 +26,14 @@ prompt = """You are an intelligent driving assistant whose goal is to drive safe
 You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. 
 Explain your reasoning thoroughly for each candidate action before selecting the most optimal action."""
 
-def ask_llm(model, prompt, actions, state):
+def ask_llm(
+        model: str,
+        prompt: str,
+        actions: list[str],
+        state: list[Vehicle]
+    ) -> tuple[str, int]:
     """
-    Ask llm to make a driving decision based on the current environment.
-    
-
-    Args:
-        model (string):
-            Model to be used.
-
-        prompt (string):
-            Prompt to give to llm.
-
-        actions (list):
-            List of legal actions for llm to take.
-
-        state (list):
-            List of ego vehicle and four closest others names, positions, lane, and speeds.
-
-    Returns:
-        None
-
-    Notes:
+    Ask llm to make a driving decision based on the current environment, and return the given reasoning and action.
     """
 
     try:
@@ -69,5 +56,6 @@ def ask_llm(model, prompt, actions, state):
 
     except Exception as e:
         print(f"API Error or Parsing Failure: {e}")
+        
         # Return fallback safe values so the simulation doesn't crash entirely on API failure
         return "Fallback due to API parsing error.", 1

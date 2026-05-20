@@ -27,11 +27,11 @@ DEFAULT_SETTINGS = {
     }
 }
 
-"""
-Purpose: Extract current copy of settings from SETTINGS_FILE if it exists, otherwise make a copy of the default settings and return that
-Output: Dictionary containing copy of saved settings, or default settings
-"""
-def load_settings():
+def load_settings() -> dict:
+    """
+    Extract current copy of settings from SETTINGS_FILE if it exists, otherwise make a copy of the default settings and return that
+    """
+
     # If SETTINGS_FILE already exists, extract current settings from it
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r") as f:
@@ -41,9 +41,9 @@ def load_settings():
             for key, value in DEFAULT_SETTINGS.items():
                 # If value type is a dict, expand it and check that all keys of the dictionary are present
                 if type(value) is dict:
-                    for k2, v2 in DEFAULT_SETTINGS[key].items():
-                        if k2 not in current[key]:
-                            current[key][k2] = v2
+                    for key2, value2 in DEFAULT_SETTINGS[key].items():
+                        if key2 not in current[key]:
+                            current[key][key2] = value2
                 # If value is of a scalar type, update it if missing
                 if key not in current:
                     current[key] = value
@@ -54,17 +54,12 @@ def load_settings():
     else:
         return DEFAULT_SETTINGS.copy()
 
-def save_settings(settings):
+def save_settings(
+        settings: dict
+    ) -> None:
     """
     Save current version of settings to SETTINGS_FILE
     Should be called whenver program is terminated to save any changes that were made
-
-    Args:
-        settings (dict):
-            Dictionary that contains the current state of all the settings
-
-    Returns:
-        None
     """
 
     with open(SETTINGS_FILE, "w") as f:
