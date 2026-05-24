@@ -138,14 +138,14 @@ class Simulator():
 
                 # Check that LLM hasn't returned an invalid action index
                 if action in range(0, 5):
-                    next_state, _, terminated, truncated, _ = self.env.step(action)
+                    obs, _, terminated, truncated, _ = self.env.step(action)
 
                     log.write(f"Action: {self.env.unwrapped.action_type.ACTIONS_ALL[action]}\n\n")
                     log.write(f"Response:\n{response}\n\n")
 
                 else:
                     # If the LLM gave an invalid response default to the IDLE action
-                    next_state, _, terminated, truncated, _ = self.env.step(1)
+                    obs, _, terminated, truncated, _ = self.env.step(1)
 
                     log.write(f"Fallback due to invalid action given by LLM.\nAction: IDLE")
                     log.write(f"Response:\n{response}\n\n")

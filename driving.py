@@ -197,7 +197,7 @@ for episode in range(0, episodes):
     done = False
     frame_list = []
     speeds = []
-    use_gpt = 1
+    use_gpt = 0
 
     # Create folder to save frame images to
     frames = f"frames/frames_{int(time.time())}"
