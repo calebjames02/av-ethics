@@ -8,11 +8,10 @@ from PIL import Image
 from settings import load_settings, save_settings
 from tools import closest_same_lane, Vehicle
 from torch.utils.tensorboard import SummaryWriter
-import threading
 import multiprocessing
 from multiprocessing import Process, Array, Manager, Queue
 
-NUM_WORKERS = 2
+NUM_WORKERS = 10
 
 config = {
     "observation": {
@@ -27,15 +26,9 @@ config = {
 first_folder = time.time()
 first_folder = str(first_folder)
 os.makedirs(first_folder, exist_ok=True)
-frames = {}
 
-def process(frames, config, q, lock):
+def process(frames, config, q):
     while True:
-#        with lock:
-#            if len(arr) == 0:
-#                break
-
-#            value = arr.pop()
         value = q.get(block=True)
 
         if value is None:
@@ -43,7 +36,7 @@ def process(frames, config, q, lock):
 
         frame_count = complete_episode(config, value)
         print(f"{value}: {frame_count}")
-        frames[value] = frame_count
+        frames.put((value, frame_count))
 
 def complete_episode(config, run_num) -> tuple[int, list[float]]:
         """
@@ -123,73 +116,35 @@ def complete_episode(config, run_num) -> tuple[int, list[float]]:
 
             return frame_count
 
-#            return frame_count, speeds
-
-#complete_episode(config)
-
-"""
-envs = gym.make_vec("highway-v0", num_envs=2, vectorization_mode="async")
-envs = gym.vector.AsyncVectorEnv([lambda: gym.make("highway-v0", render_mode="rgb_array", config=config) for _ in range(2)],
-                                    autoreset_mode=gym.vector.AutoresetMode.DISABLED)
-observations, infos = envs.reset()
-frames = envs.render()
-
-done = False
-
-while not done:
-    frames = envs.render()
-
-    _, _, terminations, truncations, _ = envs.step([1, 1])
-
-    for termination, truncation in terminations, truncations:
-        if termination or truncation:
-            obs, infos = envs.reset_done()
-            done = True
-envs.close()
-"""
-
-"""
-t1 = threading.Thread(target=complete_episode, args=(config,))
-t2 = threading.Thread(target=complete_episode, args=(config,))
-
-t1.start()
-t2.start()
-
-t1.join()
-t2.join()
-"""
-
-
-def task(name):
-    print(f"Process {name} is running")
-    time.sleep(1)
-    print(f"Process {name} finished")
-
 if __name__ == '__main__':
     processes = []
     manager = Manager()
-    lock = manager.Lock()
-    q = Queue()
-    for i in range(10):
+#    frames = manager.dict()
+    q = multiprocessing.Queue()
+    frames = multiprocessing.Queue()
+
+    for i in range(100):
         q.put(i)
+
     for i in range(NUM_WORKERS):
         q.put(None)
-    nums = manager.list([x for x in reversed(range(10))])
-    frames = manager.dict()
-    # Create 5 processes
+
     for i in range(NUM_WORKERS):
-        p = multiprocessing.Process(target=process, args=(frames, config, q, lock))
+        p = multiprocessing.Process(target=process, args=(frames, config, q))
         processes.append(p)
         p.start()
 
-    # Wait for all processes to complete
     for p in processes:
         p.join()
 
-temp = list(frames.keys())
-#print(temp)
-temp.sort()
-#print(temp)
-for key in temp:
-    print(f"{key}: {frames[key]} ", end="")
-print()
+    temp = []
+    while not frames.empty():
+        temp.append(frames.get())
+
+    print(temp)
+    temp.sort()
+    for v1, v2 in temp:
+        print(f"{v1}: {v2} ", end="")
+    print()
+    total = sum(v2 for _, v2 in temp)
+    print(f"Average timesteps: {total / len(temp)}")
