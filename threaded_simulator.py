@@ -5,9 +5,39 @@ import time
 from graphs import graph_plot, graph_plot_point
 from llm import ask_llm, prompt
 from PIL import Image
-from settings import load_settings, save_settings
+from settings import load_settings, save_settings, DEFAULT_MODEL
 from tools import closest_same_lane, Vehicle
 from torch.utils.tensorboard import SummaryWriter
+import multiprocessing
+from multiprocessing import Process, Array, Manager, Queue
+from episode import complete_episode
+
+NUM_WORKERS = 10
+
+def process_func(
+        q: multiprocessing.Queue,
+        results: multiprocessing.Queue,
+        config: dict,
+        model: str,
+        episode_folder: str,
+        use_llm: bool,
+        save_frames: bool,
+    ) -> None:
+        """
+        Runs episodes and saves metrics while there is work to be done.        
+        """
+        while True:
+            # Get episode number from passed in queue
+            value = q.get(block=True)
+            
+            # No work left to do so terminate
+            if value is None:
+                break
+
+            # Run episode and save metrics
+            frame_count, speeds = complete_episode(config=config, model=model, episode_folder=episode_folder + f"_{value}", use_llm=use_llm, save_frames=save_frames)
+            print(f"Episode {value} complete")
+            results.put((value, frame_count, speeds))
 
 class Simulator():
     """
@@ -22,7 +52,6 @@ class Simulator():
         self.graph_settings = self.settings["graph_settings"]
         self.general_settings = self.settings["general_settings"]
         self.llm_settings = self.settings["llm_settings"]
-        self.folder_name = self.general_settings["output_folder"]
 
         # Tracks number of times a test batch is executed, not individual episodes
         self.run_count = 1
@@ -49,126 +78,70 @@ class Simulator():
         """
         Execute a batch of episodes and generate comprehensive telemetry outputs.
 
+        Creates and uses NUM_WORKERS sub processes to parallelize testing episodes
         Creates a timestamped directory for the test batch.
         Generates line and bar graphs tracking average speeds and survival rates.
         """
-        self.timesteps, self.speeds = ([] for _ in range(2))
+        processes = []
 
         # Make folder for episode output
-        self.test_folder = f"{self.folder_name}/run_{self.run_count}_{int(time.time())}/"
-        os.makedirs(self.test_folder, exist_ok=True)
+        test_folder = f"{self.general_settings['output_folder']}/run_{self.run_count}_{int(time.time())}/"
+        os.makedirs(test_folder, exist_ok=True)
 
-        for episode in range (0, episodes):
-            print(f"Episode: {episode}")
-            self.episode_folder = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode{episode + 1}_{int(time.time())}"
-            frame_count, episode_speeds = self.complete_episode()
-            self.speeds.append(sum(episode_speeds) / len(episode_speeds))
-            self.timesteps.append(frame_count)
+        # Make a queue to store episode numbers, which the processes use to know when to work
+        # multiprocessing.Queue() is used specifically because it can be safely accesses by multiple concurrent processes
+        q = multiprocessing.Queue()
+        for episode_num in range(1, episodes + 1):
+            q.put(episode_num)
 
-        # Create folder for graphs
-        self.episode_graph_folder = self.test_folder + "graphs"
-        os.makedirs(self.episode_graph_folder, exist_ok=True)
+        # When processes get None instead of a number from the queue they know there is no work left to do and can terminate
+        for _ in range(NUM_WORKERS):
+            q.put(None)
 
-        x = list(range(1, episodes + 1))
-        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", x, self.speeds, 30)
-        graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", "Episode", "Timesteps", x, self.timesteps, 40)
-        graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", "", "Timesteps", sum(self.timesteps) / len(self.timesteps), 40)
-        graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", "", "Success Rate %", self.timesteps.count(40) / len(self.timesteps) * 100, 100)
+        results = multiprocessing.Queue()
+        episode_folder_base = f"{test_folder}{self.general_settings['output_subfolder']}_episode"
+        model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), DEFAULT_MODEL)
+        print(model)
+
+        for episode in range (NUM_WORKERS):
+            args = (q, results, self.config, model, episode_folder_base, True, self.general_settings["save_frame_images"])
+
+            # Create and start the process
+            p = multiprocessing.Process(target=process_func, args=args)
+            p.start()
+
+            # Add the process to a list for access later
+            processes.append(p)
+
+        # Wait until each process is finished before proceeding
+        for p in processes:
+            p.join()
+
+        values = []
+        # Extract all return values from processes into a list
+        while not results.empty():
+            values.append(results.get())
+
+        # If there are no return values then there is nothing to log, so just return
+        if len(values) == 0:
+            return
+
+        # The values list is in the order episodes finish, so it needs to be sorted to ensure each episode shows up in order numerically
+        values.sort()
+
+        # Extract metrics from values list
+        episodes, timesteps, speeds = map(list, zip(*values))
+        speeds = [float(sum(s) / len(s)) if s else 0.0 for s in speeds]
+
+        episode_graph_folder = test_folder + "graphs"
+        os.makedirs(episode_graph_folder, exist_ok=True)
+
+        graph_plot(self.graph_settings["episode_speed"], episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", episodes, speeds, 30)
+        graph_plot(self.graph_settings["timesteps_lasted"], episode_graph_folder, "Timesteps Lasted", "Episode", "Timesteps", episodes, timesteps, 41)
+        graph_plot_point(self.graph_settings["average_timesteps_lasted"], episode_graph_folder, "Average Timesteps Lasted", "", "Timesteps", sum(timesteps) / len(timesteps), 40)
+        graph_plot_point(self.graph_settings["average_success_rate"], episode_graph_folder, "Average Success Rate", "", "Success Rate %", timesteps.count(40) / len(timesteps) * 100, 100)
 
         self.run_count += 1
-
-    def complete_episode(self) -> tuple[int, list[float]]:
-        """
-        Run a single simulation episode to completion (crash or timeout).
-        
-        Initializes the environment, captures frame data, formats the state space for 
-        the LLM (if enabled), executes the chosen actions, and logs the process.
-
-        Renders and saves individual frame images to disk (if enabled).
-        Writes telemetry and LLM reasoning directly to a log.txt file.
-        """
-
-        self.env = gym.make('highway-v0', render_mode="rgb_array", config=self.config)
-
-        state, _ = self.env.reset()
-        frame_count = 0
-        obs = state
-        done = False
-        speeds = []
-        self.use_llm = False
-
-        # Create folder to save each frame of the environment to
-        os.makedirs(self.episode_folder, exist_ok=True)
-
-        # Create file to log output to
-        log = open(f"{self.episode_folder}/log.txt", "w")
-
-        # Set model to be whichever model is selected in settings
-        # If somehow nothing is selected, then default to glm-4.7
-        self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
-        print(self.model)
-
-        while not done:
-            # Render frame and save it locally if enabled
-            frame = self.env.render()
-            if self.general_settings["save_frame_images"]:
-                Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
-
-            cars = [Vehicle(name="Ego vehicle", x_pos=round(obs[0][1], 4), lane=round(obs[0][2] / 4 + 1), x_vel=round(obs[0][3], 4), y_vel=round(obs[0][4], 4))]
-            speeds.append(round(obs[0][3], 4))
-            for i in range (1, len(obs)):
-                cars.append(Vehicle(name=f"Vehicle: {i}", x_pos=round(obs[i][1], 4), lane=round(obs[i][2] / 4 + 1), x_vel=round(obs[i][3], 4), y_vel=round(obs[i][4], 4)))
-
-            # Initialize log with output of all cars
-            log.write(f"Timestep: {frame_count}\n\n")
-            frame_count += 1
-            for i in range (0, len(cars)):
-                log.write(f"{cars[i]}\n")
-            log.write("\n")
-
-            if self.use_llm:
-                available = self.env.unwrapped.action_type.get_available_actions()
-                available_actions = [f"{action}: {self.env.unwrapped.action_type.ACTIONS_ALL[action]}" for action in available]
-
-                # Action indeces don't match their position in the list which can be confusing for the LLM
-                # Sorting the list ensures that the index in the string matches its position in the list
-                available_actions.sort()
-
-                response, action = ask_llm(self.model, prompt, available_actions, cars)
-
-                # Check that LLM hasn't returned an invalid action index
-                if action in range(0, 5):
-                    obs, _, terminated, truncated, _ = self.env.step(action)
-
-                    log.write(f"Action: {self.env.unwrapped.action_type.ACTIONS_ALL[action]}\n\n")
-                    log.write(f"Response:\n{response}\n\n")
-
-                else:
-                    # If the LLM gave an invalid response default to the IDLE action
-                    obs, _, terminated, truncated, _ = self.env.step(1)
-
-                    log.write(f"Fallback due to invalid action given by LLM.\nAction: IDLE")
-                    log.write(f"Response:\n{response}\n\n")
-            else:
-                # If LLM disabled, take IDLE action
-                obs, _, terminated, truncated, _ = self.env.step(1)
-
-            # If all timesteps of the episode have been executed or if the agent crashed then the episode is done
-            # Terminated is true if the agent crashed, truncated is true if the max number of timesteps are reached
-            done = terminated or truncated
-
-            log.write("-------------------------------------------------\n\n")
-
-        # After episode ends save the last frame
-        # This is necessary to save the frame of a crash
-        frame = self.env.render()
-        if self.general_settings["save_frame_images"]:
-            Image.fromarray(frame).save(f"{self.episode_folder}/frame_{frame_count:05d}.png")
-
-        log.close()
-        self.env.close()
-
-        return frame_count, speeds
 
     def modify_settings(self, setting_val: str) -> None:
         """
@@ -184,7 +157,7 @@ class Simulator():
             if is_llm_setting:
                 # Set model to be whichever model is selected in settings
                 # If somehow nothing is selected, then default to glm-4.7
-                self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
+                self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), DEFAULT_MODEL)
                 print(f"Current model: {self.model}")
 
             # Print all settings and their values
@@ -316,10 +289,10 @@ while(1):
                 if val == '0':
                     break
 
-                try: 
-                    val = int(val)
-                    sim.test(val)
-                except:
-                    print("Invalid input\n")
+#                try: 
+                val = int(val)
+                sim.test(val)
+#                except:
+#                    print("Invalid input\n")
 
 sim.save()

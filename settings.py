@@ -3,6 +3,8 @@ import os
 
 SETTINGS_FILE = "settings.json"
 
+DEFAULT_MODEL = "gpt-oss"
+
 DEFAULT_SETTINGS = {
     "general_settings": {
     "tensorboard_writer": "runs",
@@ -19,9 +21,9 @@ DEFAULT_SETTINGS = {
     "llm_settings": {
         "qwen3": False,
         "gpt-oss": True,
-        "glm-4.7": False,
+        "glm-5": False,
         "gemma": False,
-        "olmo": False,
+        "kimi": False,
         "minimax-m2": False,
         "prompt": "You are an intelligent driving assistant whose goal is to drive safely and efficiently. You are directing the ego vehicle in this simulation, and your job is to select the best action given a list of possible actions and the state space at a specific time step. Explain your reasoning thoroughly for each candidate action before selecting the most optimal action.",
     }
