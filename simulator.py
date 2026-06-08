@@ -70,7 +70,7 @@ class Simulator():
         os.makedirs(self.episode_graph_folder, exist_ok=True)
 
         x = list(range(1, episodes + 1))
-        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", x, self.speeds, 25)
+        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", x, self.speeds, 30)
         graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", "Episode", "Timesteps", x, self.timesteps, 40)
         graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", "", "Timesteps", sum(self.timesteps) / len(self.timesteps), 40)
         graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", "", "Success Rate %", self.timesteps.count(40) / len(self.timesteps) * 100, 100)

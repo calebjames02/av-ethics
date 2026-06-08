@@ -5,33 +5,39 @@ import time
 from graphs import graph_plot, graph_plot_point
 from llm import ask_llm, prompt
 from PIL import Image
-from settings import load_settings, save_settings
+from settings import load_settings, save_settings, DEFAULT_MODEL
 from tools import closest_same_lane, Vehicle
 from torch.utils.tensorboard import SummaryWriter
 import multiprocessing
 from multiprocessing import Process, Array, Manager, Queue
 from episode import complete_episode
 
-NUM_WORKERS = 20
+NUM_WORKERS = 10
 
 def process_func(
-        config: dict,
-        use_llm: bool,
-        episode_folder: str,
-        model: str,
-        save_frames: bool,
         q: multiprocessing.Queue,
-        return_values: multiprocessing.Queue
+        results: multiprocessing.Queue,
+        config: dict,
+        model: str,
+        episode_folder: str,
+        use_llm: bool,
+        save_frames: bool,
     ) -> None:
+        """
+        Runs episodes and saves metrics while there is work to be done.        
+        """
         while True:
+            # Get episode number from passed in queue
             value = q.get(block=True)
-
+            
+            # No work left to do so terminate
             if value is None:
                 break
 
-            frame_count, speeds = complete_episode(config=config, use_llm=use_llm, episode_folder=episode_folder + f"_{value}", model=model, save_frames=save_frames)
-            print(f"{value}: {frame_count}")
-            return_values.put((value, frame_count, speeds))
+            # Run episode and save metrics
+            frame_count, speeds = complete_episode(config=config, model=model, episode_folder=episode_folder + f"_{value}", use_llm=use_llm, save_frames=save_frames)
+            print(f"Episode {value} complete")
+            results.put((value, frame_count, speeds))
 
 class Simulator():
     """
@@ -46,7 +52,6 @@ class Simulator():
         self.graph_settings = self.settings["graph_settings"]
         self.general_settings = self.settings["general_settings"]
         self.llm_settings = self.settings["llm_settings"]
-        self.folder_name = self.general_settings["output_folder"]
 
         # Tracks number of times a test batch is executed, not individual episodes
         self.run_count = 1
@@ -73,71 +78,68 @@ class Simulator():
         """
         Execute a batch of episodes and generate comprehensive telemetry outputs.
 
+        Creates and uses NUM_WORKERS sub processes to parallelize testing episodes
         Creates a timestamped directory for the test batch.
         Generates line and bar graphs tracking average speeds and survival rates.
         """
-        self.timesteps, self.speeds = ([] for _ in range(2))
         processes = []
 
         # Make folder for episode output
-        self.test_folder = f"{self.folder_name}/run_{self.run_count}_{int(time.time())}/"
-        os.makedirs(self.test_folder, exist_ok=True)
-        q = multiprocessing.Queue()
-        return_values = multiprocessing.Queue()
+        test_folder = f"{self.general_settings['output_folder']}/run_{self.run_count}_{int(time.time())}/"
+        os.makedirs(test_folder, exist_ok=True)
 
-        for episode_num in range(episodes):
+        # Make a queue to store episode numbers, which the processes use to know when to work
+        # multiprocessing.Queue() is used specifically because it can be safely accesses by multiple concurrent processes
+        q = multiprocessing.Queue()
+        for episode_num in range(1, episodes + 1):
             q.put(episode_num)
 
+        # When processes get None instead of a number from the queue they know there is no work left to do and can terminate
         for _ in range(NUM_WORKERS):
             q.put(None)
 
-        episode_folder_base = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode"
-        model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
+        results = multiprocessing.Queue()
+        episode_folder_base = f"{test_folder}{self.general_settings['output_subfolder']}_episode"
+        model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), DEFAULT_MODEL)
+        print(model)
 
         for episode in range (NUM_WORKERS):
-            print(f"Episode: {episode}")
-#            self.episode_folder = f"{self.test_folder}{self.general_settings['output_subfolder']}_episode{episode + 1}_{int(time.time())}"
-            args = (self.config, False, episode_folder_base, model, self.general_settings["save_frame_images"], q, return_values)
-            #frame_count, episode_speeds = self.complete_episode(config=self.config, use_llm=False, episode_folder=self.episode_folder, model=self.model, save_frames=self.general_settings["save_frame_images"])
+            args = (q, results, self.config, model, episode_folder_base, True, self.general_settings["save_frame_images"])
+
+            # Create and start the process
             p = multiprocessing.Process(target=process_func, args=args)
             p.start()
-            processes.append(p)
-#            p.join()
-#            self.speeds.append(sum(episode_speeds) / len(episode_speeds))
-#            self.timesteps.append(frame_count)
 
+            # Add the process to a list for access later
+            processes.append(p)
+
+        # Wait until each process is finished before proceeding
         for p in processes:
             p.join()
 
-#        values = []
-#        while not return_values.empty():
-#            values.append(return_values.get())
         values = []
-        for _ in range(episodes):
-            try:
-                values.append(return_values.get(timeout=30))
-            except Exception:
-                pass
+        # Extract all return values from processes into a list
+        while not results.empty():
+            values.append(results.get())
+
+        # If there are no return values then there is nothing to log, so just return
         if len(values) == 0:
             return
+
+        # The values list is in the order episodes finish, so it needs to be sorted to ensure each episode shows up in order numerically
         values.sort()
-#        print([v for v, _, _ in values])
-        episodes, self.timesteps, self.speeds = map(list, zip(*values))
-        #self.timesteps = [v for _, v, _ in values]
-        print(self.timesteps)
-        #self.speeds = [v for _, _, v in values]
-        self.speeds = [float(sum(s) / len(s)) if s else 0.0 for s in self.speeds]
-        print(self.speeds)
 
-        # Create folder for graphs
-        self.episode_graph_folder = self.test_folder + "graphs"
-        os.makedirs(self.episode_graph_folder, exist_ok=True)
+        # Extract metrics from values list
+        episodes, timesteps, speeds = map(list, zip(*values))
+        speeds = [float(sum(s) / len(s)) if s else 0.0 for s in speeds]
 
-        x = [v for v, _, _ in values]
-        graph_plot(self.graph_settings["episode_speed"], self.episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", x, self.speeds, 25)
-        graph_plot(self.graph_settings["timesteps_lasted"], self.episode_graph_folder, "Timesteps Lasted", "Episode", "Timesteps", x, self.timesteps, 40)
-        graph_plot_point(self.graph_settings["average_timesteps_lasted"], self.episode_graph_folder, "Average Timesteps Lasted", "", "Timesteps", sum(self.timesteps) / len(self.timesteps), 40)
-        graph_plot_point(self.graph_settings["average_success_rate"], self.episode_graph_folder, "Average Success Rate", "", "Success Rate %", self.timesteps.count(40) / len(self.timesteps) * 100, 100)
+        episode_graph_folder = test_folder + "graphs"
+        os.makedirs(episode_graph_folder, exist_ok=True)
+
+        graph_plot(self.graph_settings["episode_speed"], episode_graph_folder, "Average Speed", "Episode", "Speed (m/s)", episodes, speeds, 30)
+        graph_plot(self.graph_settings["timesteps_lasted"], episode_graph_folder, "Timesteps Lasted", "Episode", "Timesteps", episodes, timesteps, 41)
+        graph_plot_point(self.graph_settings["average_timesteps_lasted"], episode_graph_folder, "Average Timesteps Lasted", "", "Timesteps", sum(timesteps) / len(timesteps), 40)
+        graph_plot_point(self.graph_settings["average_success_rate"], episode_graph_folder, "Average Success Rate", "", "Success Rate %", timesteps.count(40) / len(timesteps) * 100, 100)
 
         self.run_count += 1
 
@@ -155,7 +157,7 @@ class Simulator():
             if is_llm_setting:
                 # Set model to be whichever model is selected in settings
                 # If somehow nothing is selected, then default to glm-4.7
-                self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
+                self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), DEFAULT_MODEL)
                 print(f"Current model: {self.model}")
 
             # Print all settings and their values

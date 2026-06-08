@@ -1,21 +1,44 @@
 import gymnasium as gym
-import highway_env
 import os
-import time
-from graphs import graph_plot, graph_plot_point
-from llm import ask_llm, prompt
 from PIL import Image
-from settings import load_settings, save_settings
-from tools import closest_same_lane, Vehicle
-from torch.utils.tensorboard import SummaryWriter
-import multiprocessing
-from multiprocessing import Process, Array, Manager, Queue
+from tools import Vehicle
+from llm import ask_llm, prompt
+
+
+def print_vehicles(vehicles):
+    """
+    Formats vehicle information grouped by lane into a readable string.
+
+    Vehicles are separated into four lanes based on their `lane` attribute.
+    For each lane, the function lists every vehicle along with its x position, x velocity, and y velocity. Empty lanes are labeled as "Empty".
+    """
+
+    # Create 4 empty lists, one for each lane
+    lanes = [[] for _ in range(4)]
+    output = ""
+
+    # Store each vehicle in their corresponding lane
+    for vehicle in vehicles:
+        lanes[vehicle.lane - 1].append(vehicle)
+
+    for i in range(len(lanes)):
+        output += f"Lane: {i + 1}\n"
+
+        if not len(lanes[i]):
+            output += "Empty\n\n"
+        else:
+            for car in lanes[i]:
+                output += f"{car.name}:\nx position = {float(car.x_pos)}, x velocity = {float(car.x_vel)}, y velocity = {float(car.y_vel)}\n\n"
+
+        output += "\n"
+
+    return output
 
 def complete_episode(
         config: dict,
-        use_llm: bool,
-        episode_folder: str,
         model: str,
+        episode_folder: str,
+        use_llm: bool,
         save_frames: bool
     ) -> tuple[int, list[float]]:
         """
@@ -35,18 +58,9 @@ def complete_episode(
         obs = state
         done = False
         speeds = []
-        use_llm = False
 
         # Create folder to save each frame of the environment to
         os.makedirs(episode_folder, exist_ok=True)
-
-        # Create file to log output to
-#        log = open(f"{episode_folder}/log.txt", "w")
-
-        # Set model to be whichever model is selected in settings
-        # If somehow nothing is selected, then default to glm-4.7
-#        self.model = next((k for k, v in self.llm_settings.items() if v and k != 'prompt'), "glm-4.7")
-        print(model)
 
         with open(f"{episode_folder}/log.txt", "w") as log:
             while not done:
@@ -64,19 +78,20 @@ def complete_episode(
                 # Initialize log with output of all cars
                 log.write(f"Timestep: {frame_count}\n\n")
                 frame_count += 1
-                for i in range (0, len(cars)):
-                    log.write(f"{cars[i]}\n")
-                log.write("\n")
+                log.write(print_vehicles(cars))
 
                 if use_llm:
                     available = env.unwrapped.action_type.get_available_actions()
                     available_actions = [f"{action}: {env.unwrapped.action_type.ACTIONS_ALL[action]}" for action in available]
 
+#                    print(env.unwrapped.action_type.ACTIONS_ALL)
+
                     # Action indeces don't match their position in the list which can be confusing for the LLM
                     # Sorting the list ensures that the index in the string matches its position in the list
                     available_actions.sort()
 
-                    response, action = ask_llm(model, prompt, available_actions, cars)
+                    response, action = ask_llm(model, prompt, env.unwrapped.action_type.ACTIONS_ALL, cars)
+#                    response, action = ask_llm(model, prompt, available_actions, cars)
 
                     # Check that LLM hasn't returned an invalid action index
                     if action in range(0, 5):
